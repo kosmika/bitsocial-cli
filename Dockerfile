@@ -2,6 +2,7 @@
 FROM node:22-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 make g++ && rm -rf /var/lib/apt/lists/*
+RUN npm install -g npm@11.13.0
 
 WORKDIR /app
 
@@ -22,6 +23,7 @@ RUN --mount=type=secret,id=github_token \
 FROM node:22-slim AS deps
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 make g++ && rm -rf /var/lib/apt/lists/*
+RUN npm install -g npm@11.13.0
 
 WORKDIR /app
 

@@ -46,6 +46,7 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
+      - run: npm install -g npm@11.13.0
 
       - name: Smoke test Docker deps stage
         if: matrix.os == 'ubuntu-latest'
