@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.54 (2026-05-07)</small>
+
+* chore(deps): upgrade pkc-js to 0.0.29 ([85e19dc](https://github.com/bitsocialnet/bitsocial-cli/commit/85e19dc))
+
 ## <small>0.19.53 (2026-05-07)</small>
 
 * chore(deps): upgrade pkc-js to 0.0.28 ([56f6f85](https://github.com/bitsocialnet/bitsocial-cli/commit/56f6f85))
