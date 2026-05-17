@@ -207,17 +207,17 @@ export default class Daemon extends Command {
         }
 
         // Write real errors to both the terminal and the log file
-        const writeErrorToTerminal = (err: unknown) => {
+        const writeErrorToTerminal = (label: string, err: unknown) => {
             const msg = err instanceof Error ? err.stack || err.message : String(err);
-            stderrWrite(msg + EOL);
+            stderrWrite(`[${label}] ${msg}${EOL}`);
         };
         process.on("uncaughtException", (err) => {
-            writeErrorToTerminal(err);
-            console.error(err);
+            writeErrorToTerminal("uncaughtException", err);
+            console.error("[uncaughtException]", err);
         });
         process.on("unhandledRejection", (err) => {
-            writeErrorToTerminal(err);
-            console.error(err);
+            writeErrorToTerminal("unhandledRejection", err);
+            console.error("[unhandledRejection]", err);
         });
 
         process.on("exit", () => {
