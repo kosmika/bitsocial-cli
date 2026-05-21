@@ -1,5 +1,12 @@
 # Changelog
 
+## <small>0.19.60 (2026-05-21)</small>
+
+* fix(daemon): fail fast when PKC RPC port is already in use ([bfe3d5c](https://github.com/bitsocialnet/bitsocial-cli/commit/bfe3d5c)), closes [#46](https://github.com/bitsocialnet/bitsocial-cli/issues/46)
+* fix(daemon): normalize wildcard hostname before RPC port check ([06693ba](https://github.com/bitsocialnet/bitsocial-cli/commit/06693ba))
+* fix(daemon): throw instead of silent return when RPC port races ([5094658](https://github.com/bitsocialnet/bitsocial-cli/commit/5094658))
+* fix(ipfs): listen on 'close' so stderr drains before _spawnAsync rejects ([f7c7d1d](https://github.com/bitsocialnet/bitsocial-cli/commit/f7c7d1d))
+
 ## <small>0.19.59 (2026-05-20)</small>
 
 * test(kubo): pre-init repos with ephemeral swarm so parallel tests don't collide on 4001 ([4342f68](https://github.com/bitsocialnet/bitsocial-cli/commit/4342f68)), closes [#44](https://github.com/bitsocialnet/bitsocial-cli/issues/44)
