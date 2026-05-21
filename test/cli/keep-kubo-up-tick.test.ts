@@ -33,7 +33,6 @@ describe("runKeepKuboUpTick", () => {
                     return Promise.reject(err);
                 },
                 pkcOptionsFromFlag: undefined,
-                usingDifferentProcessRpc: false,
                 hasKuboProcess: false,
                 hasPendingKuboStart: false,
                 keepKuboUp: async () => {},
@@ -54,7 +53,6 @@ describe("runKeepKuboUpTick", () => {
                 pkcRpcUrl: new URL("ws://localhost:9138"),
                 tcpPortUsedCheck: async () => false,
                 pkcOptionsFromFlag: undefined,
-                usingDifferentProcessRpc: false,
                 hasKuboProcess: false,
                 hasPendingKuboStart: false,
                 keepKuboUp: async () => {
@@ -76,7 +74,6 @@ describe("runKeepKuboUpTick", () => {
                 pkcRpcUrl: new URL("ws://localhost:9138"),
                 tcpPortUsedCheck: async () => true,
                 pkcOptionsFromFlag: undefined,
-                usingDifferentProcessRpc: true,
                 hasKuboProcess: true,
                 hasPendingKuboStart: false,
                 keepKuboUp: async () => {},
@@ -98,7 +95,6 @@ describe("runKeepKuboUpTick", () => {
             pkcRpcUrl: new URL("ws://localhost:9138"),
             tcpPortUsedCheck: async () => false,
             pkcOptionsFromFlag: undefined,
-            usingDifferentProcessRpc: false,
             hasKuboProcess: false,
             hasPendingKuboStart: false,
             keepKuboUp: async () => {

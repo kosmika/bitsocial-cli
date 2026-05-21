@@ -51,7 +51,6 @@ export interface KeepKuboUpTickDeps {
     pkcRpcUrl: URL;
     tcpPortUsedCheck: (port: number, host: string) => Promise<boolean>;
     pkcOptionsFromFlag: { kuboRpcClientsOptions?: unknown } | undefined;
-    usingDifferentProcessRpc: boolean;
     hasKuboProcess: boolean;
     hasPendingKuboStart: boolean;
     keepKuboUp: () => Promise<void>;
@@ -70,11 +69,11 @@ export interface KeepKuboUpTickDeps {
 export async function runKeepKuboUpTick(deps: KeepKuboUpTickDeps): Promise<void> {
     let isRpcPortTaken = false;
     try {
-        isRpcPortTaken = await deps.tcpPortUsedCheck(Number(deps.pkcRpcUrl.port), deps.pkcRpcUrl.hostname);
-        if (!deps.pkcOptionsFromFlag?.kuboRpcClientsOptions && !isRpcPortTaken && !deps.usingDifferentProcessRpc) await deps.keepKuboUp();
-        else if (deps.pkcOptionsFromFlag?.kuboRpcClientsOptions && !deps.usingDifferentProcessRpc) await deps.keepKuboUp();
+        isRpcPortTaken = await deps.tcpPortUsedCheck(Number(deps.pkcRpcUrl.port), toConnectableHostname(deps.pkcRpcUrl.hostname));
+        if (!deps.pkcOptionsFromFlag?.kuboRpcClientsOptions && !isRpcPortTaken) await deps.keepKuboUp();
+        else if (deps.pkcOptionsFromFlag?.kuboRpcClientsOptions) await deps.keepKuboUp();
         // Retry if kubo died and onKuboExit's restart attempt failed (e.g. transient port conflict)
-        else if (!deps.hasKuboProcess && !deps.hasPendingKuboStart && !deps.usingDifferentProcessRpc) await deps.keepKuboUp();
+        else if (!deps.hasKuboProcess && !deps.hasPendingKuboStart) await deps.keepKuboUp();
     } catch (error) {
         deps.onError(`keepKuboUp tick error (will retry): ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -284,6 +283,17 @@ export default class Daemon extends Command {
             if (pkcOptionsFromFlag?.ipfsGatewayUrls && pkcOptionsFromFlag.ipfsGatewayUrls.length !== 1)
                 this.error("Can't provide pkcOptions.ipfsGatewayUrls as an array with more than 1 element, or as a non array");
 
+            const rpcConnectHostname = toConnectableHostname(pkcRpcUrl.hostname);
+            const isRpcPortAlreadyTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), rpcConnectHostname);
+            if (isRpcPortAlreadyTaken) {
+                this.error(
+                    `PKC RPC port is already in use at ${pkcRpcUrl} (another bitsocial daemon is likely running). ` +
+                        `To talk to the running daemon, use other bitsocial commands with --pkcRpcUrl ${pkcRpcUrl} ` +
+                        `(e.g. 'bitsocial community list --pkcRpcUrl ${pkcRpcUrl}'). ` +
+                        `To run a second daemon, restart with a different port, e.g. --pkcRpcUrl ws://${pkcRpcUrl.hostname}:${Number(pkcRpcUrl.port) + 1}.`
+                );
+            }
+
             const ipfsConfig = await loadKuboConfigFile(pkcOptionsFromFlag?.dataPath || defaultPkcOptions.dataPath!);
             const kuboRpcEndpoint = pkcOptionsFromFlag?.kuboRpcClientsOptions
                 ? new URL(pkcOptionsFromFlag.kuboRpcClientsOptions[0]!.toString())
@@ -329,7 +339,7 @@ export default class Daemon extends Command {
             const keepKuboUp = async () => {
                 if (mainProcessExited) return;
                 const kuboApiPort = Number(kuboRpcEndpoint.port);
-                if (kuboProcess || pendingKuboStart || usingDifferentProcessRpc) return; // already started, no need to intervene
+                if (kuboProcess || pendingKuboStart) return; // already started, no need to intervene
                 const connectHostname = toConnectableHostname(kuboRpcEndpoint.hostname);
                 const isKuboApiPortTaken = await tcpPortUsed.check(kuboApiPort, connectHostname);
                 if (isKuboApiPortTaken) {
@@ -418,26 +428,18 @@ export default class Daemon extends Command {
             };
 
             let startedOwnRpc = false;
-            let usingDifferentProcessRpc = false;
             let daemonServer: Awaited<ReturnType<typeof startDaemonServer>> | undefined;
             const createOrConnectRpc = async () => {
                 if (mainProcessExited) return;
                 if (startedOwnRpc) return;
-                const isRpcPortTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), pkcRpcUrl.hostname);
-                if (isRpcPortTaken && usingDifferentProcessRpc) return;
+                // Re-check the port: the early fail-fast at startup is a few ms before this runs,
+                // so a TOCTOU race could let another process grab the port in between. If that
+                // happens we must fail rather than silently leaving the daemon without an RPC.
+                const isRpcPortTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), rpcConnectHostname);
                 if (isRpcPortTaken) {
-                    log(
-                        `PKC RPC is already running (${pkcRpcUrl}) by another program. bitsocial-cli will use the running RPC server, and if shuts down, bitsocial-cli will start a new RPC instance`
+                    throw new Error(
+                        `PKC RPC port ${pkcRpcUrl.hostname}:${pkcRpcUrl.port} (${pkcRpcUrl}) became occupied before the daemon could bind it.`
                     );
-                    console.log("Using the already started RPC server at:", pkcRpcUrl);
-                    console.log("bitsocial-cli daemon will monitor the PKC RPC and kubo ipfs API to make sure they're always up");
-                    const PKC = await import("@pkcprotocol/pkc-js");
-                    const pkc = await PKC.default({ pkcRpcClientsOptions: [pkcRpcUrl.toString()] });
-                    await new Promise((resolve) => pkc.once("communitieschange", resolve));
-                    pkc.on("error", (error) => console.error("Error from pkc instance", error));
-                    console.log(`Communities in data path: `, pkc.communities);
-                    usingDifferentProcessRpc = true;
-                    return;
                 }
 
                 // Load installed challenge packages before starting the RPC server
@@ -446,7 +448,6 @@ export default class Daemon extends Command {
 
                 daemonServer = await startDaemonServer(pkcRpcUrl, ipfsGatewayEndpoint, mergedPkcOptions);
 
-                usingDifferentProcessRpc = false;
                 startedOwnRpc = true;
                 console.log(`pkc rpc: listening on ${pkcRpcUrl} (local connections only)`);
                 console.log(`pkc rpc: listening on ${pkcRpcUrl}${daemonServer.rpcAuthKey} (secret auth key for remote connections)`);
@@ -470,9 +471,8 @@ export default class Daemon extends Command {
                 }
             };
 
-            const isRpcPortTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), pkcRpcUrl.hostname);
-
-            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions && !isRpcPortTaken && !usingDifferentProcessRpc) await keepKuboUp();
+            // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
+            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
             await createOrConnectRpc();
 
             let keepKuboUpInterval: NodeJS.Timeout | undefined;
@@ -576,7 +576,6 @@ export default class Daemon extends Command {
                     pkcRpcUrl,
                     tcpPortUsedCheck: (port, host) => tcpPortUsed.check(port, host),
                     pkcOptionsFromFlag,
-                    usingDifferentProcessRpc,
                     hasKuboProcess: !!kuboProcess,
                     hasPendingKuboStart: !!pendingKuboStart,
                     keepKuboUp,

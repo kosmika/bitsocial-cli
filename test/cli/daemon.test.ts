@@ -362,6 +362,21 @@ describe("bitsocial daemon port availability validation", () => {
             () => true
         );
     });
+
+    it("fails when PKC RPC port is already in use", { timeout: 60000 }, async () => {
+        const server = await occupyPort(validationRpcPort, "localhost");
+        occupiedServers.push(server);
+
+        const result = await runPkcDaemonExpectFailure(
+            ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", validationRpcUrl],
+            { KUBO_RPC_URL: validationKuboUrl, IPFS_GATEWAY_URL: validationGatewayUrl }
+        );
+        expect(result.exitCode).not.toBe(0);
+        const combinedOutput = `${result.stdout}\n${result.stderr}`;
+        expect(combinedOutput).toContain("PKC RPC port is already in use");
+        expect(combinedOutput).toContain(String(validationRpcPort));
+        expect(combinedOutput).toContain("--pkcRpcUrl");
+    });
 });
 
 describe("bitsocial daemon kubo restart cleanup", async () => {
@@ -629,76 +644,6 @@ describe("bitsocial daemon survives transient port occupation after its own kubo
         } finally {
             await stopPkcDaemon(pkcDaemonProcess);
             await ensureKuboNodeStopped(exitKuboApiUrl);
-        }
-    });
-});
-
-describe(`bitsocial daemon (relying on PKC RPC started by another process)`, async () => {
-    let rpcProcess: ManagedChildProcess;
-    const rpcRpcUrl = `ws://localhost:9368`;
-    const rpcKuboUrl = `http://0.0.0.0:50149/api/v0`;
-    const rpcGatewayUrl = `http://0.0.0.0:6603`;
-
-    beforeAll(async () => {
-        await ensureKuboNodeStopped(`http://localhost:50149/api/v0`);
-        rpcProcess = await startPkcDaemon(
-            ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", rpcRpcUrl],
-            { KUBO_RPC_URL: rpcKuboUrl, IPFS_GATEWAY_URL: rpcGatewayUrl }
-        );
-        await testConnectionToPkcRpc(9368);
-    });
-
-    afterAll(async () => {
-        await stopPkcDaemon(rpcProcess);
-        await waitForPortFree(9368, "localhost", 10000);
-    });
-
-    it(`bitsocial daemon detects and uses another process' PKC RPC`, async () => {
-        let anotherRpcProcess: ManagedChildProcess | undefined;
-        try {
-            anotherRpcProcess = await startPkcDaemon(
-                ["--pkcRpcUrl", rpcRpcUrl],
-                { KUBO_RPC_URL: rpcKuboUrl, IPFS_GATEWAY_URL: rpcGatewayUrl }
-            );
-            await testConnectionToPkcRpc(9368);
-        } finally {
-            await stopPkcDaemon(anotherRpcProcess); // should not affect rpcProcess
-        }
-        await testConnectionToPkcRpc(9368);
-    });
-    it(`bitsocial daemon is monitoring another process' PKC RPC and make sure it's always up`, async () => {
-        let anotherRpcProcess: ManagedChildProcess | undefined;
-        try {
-            anotherRpcProcess = await startPkcDaemon(
-                ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", rpcRpcUrl],
-                { KUBO_RPC_URL: rpcKuboUrl, IPFS_GATEWAY_URL: rpcGatewayUrl }
-            );
-            await stopPkcDaemon(rpcProcess);
-
-            // Wait for anotherRpcProcess to restart the RPC
-            const rpcRestarted = await waitForCondition(async () => {
-                try {
-                    const ws = new WebSocket(rpcRpcUrl);
-                    const opened = await new Promise<boolean>((resolve) => {
-                        const timer = setTimeout(() => resolve(false), 2000);
-                        ws.once("open", () => {
-                            clearTimeout(timer);
-                            resolve(true);
-                        });
-                        ws.once("error", () => {
-                            clearTimeout(timer);
-                            resolve(false);
-                        });
-                    });
-                    ws.close();
-                    return opened;
-                } catch {
-                    return false;
-                }
-            }, 30000, 1000);
-            expect(rpcRestarted).toBe(true);
-        } finally {
-            await stopPkcDaemon(anotherRpcProcess);
         }
     });
 });
