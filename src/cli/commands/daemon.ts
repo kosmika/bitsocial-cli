@@ -69,7 +69,7 @@ export interface KeepKuboUpTickDeps {
 export async function runKeepKuboUpTick(deps: KeepKuboUpTickDeps): Promise<void> {
     let isRpcPortTaken = false;
     try {
-        isRpcPortTaken = await deps.tcpPortUsedCheck(Number(deps.pkcRpcUrl.port), deps.pkcRpcUrl.hostname);
+        isRpcPortTaken = await deps.tcpPortUsedCheck(Number(deps.pkcRpcUrl.port), toConnectableHostname(deps.pkcRpcUrl.hostname));
         if (!deps.pkcOptionsFromFlag?.kuboRpcClientsOptions && !isRpcPortTaken) await deps.keepKuboUp();
         else if (deps.pkcOptionsFromFlag?.kuboRpcClientsOptions) await deps.keepKuboUp();
         // Retry if kubo died and onKuboExit's restart attempt failed (e.g. transient port conflict)
@@ -283,7 +283,8 @@ export default class Daemon extends Command {
             if (pkcOptionsFromFlag?.ipfsGatewayUrls && pkcOptionsFromFlag.ipfsGatewayUrls.length !== 1)
                 this.error("Can't provide pkcOptions.ipfsGatewayUrls as an array with more than 1 element, or as a non array");
 
-            const isRpcPortAlreadyTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), pkcRpcUrl.hostname);
+            const rpcConnectHostname = toConnectableHostname(pkcRpcUrl.hostname);
+            const isRpcPortAlreadyTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), rpcConnectHostname);
             if (isRpcPortAlreadyTaken) {
                 this.error(
                     `PKC RPC port is already in use at ${pkcRpcUrl} (another bitsocial daemon is likely running). ` +
@@ -432,7 +433,7 @@ export default class Daemon extends Command {
                 if (mainProcessExited) return;
                 if (startedOwnRpc) return;
                 // Tick may call this after our own server is up — port being taken means our server is still healthy.
-                const isRpcPortTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), pkcRpcUrl.hostname);
+                const isRpcPortTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), rpcConnectHostname);
                 if (isRpcPortTaken) return;
 
                 // Load installed challenge packages before starting the RPC server
