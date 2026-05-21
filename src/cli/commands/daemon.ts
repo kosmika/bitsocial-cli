@@ -432,9 +432,15 @@ export default class Daemon extends Command {
             const createOrConnectRpc = async () => {
                 if (mainProcessExited) return;
                 if (startedOwnRpc) return;
-                // Tick may call this after our own server is up — port being taken means our server is still healthy.
+                // Re-check the port: the early fail-fast at startup is a few ms before this runs,
+                // so a TOCTOU race could let another process grab the port in between. If that
+                // happens we must fail rather than silently leaving the daemon without an RPC.
                 const isRpcPortTaken = await tcpPortUsed.check(Number(pkcRpcUrl.port), rpcConnectHostname);
-                if (isRpcPortTaken) return;
+                if (isRpcPortTaken) {
+                    throw new Error(
+                        `PKC RPC port ${pkcRpcUrl.hostname}:${pkcRpcUrl.port} (${pkcRpcUrl}) became occupied before the daemon could bind it.`
+                    );
+                }
 
                 // Load installed challenge packages before starting the RPC server
                 const loadedChallenges = await loadChallengesIntoPKC(mergedPkcOptions.dataPath);
