@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.61 (2026-05-23)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.37 ([b3aaa57](https://github.com/bitsocialnet/bitsocial-cli/commit/b3aaa57)), closes [#50](https://github.com/bitsocialnet/bitsocial-cli/issues/50)
+
 ## <small>0.19.60 (2026-05-21)</small>
 
 * fix(daemon): fail fast when PKC RPC port is already in use ([bfe3d5c](https://github.com/bitsocialnet/bitsocial-cli/commit/bfe3d5c)), closes [#46](https://github.com/bitsocialnet/bitsocial-cli/issues/46)
