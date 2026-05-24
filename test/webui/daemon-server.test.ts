@@ -11,11 +11,11 @@ import { startDaemonServer } from "../../dist/webui/daemon-server.js";
 // The contract we want: if the port can't be bound, startDaemonServer must reject.
 describe("startDaemonServer bind contract", () => {
     it("rejects when the RPC port is already taken (regression for issue #42)", async () => {
-        // Blocker must bind to 0.0.0.0 because express.listen(port) (no host arg) also
-        // binds to 0.0.0.0. On BSD-derived stacks (macOS, Windows) a wildcard bind and
-        // a 127.0.0.1 bind on the same port can coexist, so binding the blocker to
-        // 127.0.0.1 would let the daemon's wildcard bind succeed and the test wouldn't
-        // exercise the EADDRINUSE path.
+        // The blocker must bind the *same way* the daemon does — no host argument —
+        // so it lands on whatever default Node picks for this platform. On macOS and
+        // Windows that default is the IPv6 wildcard `::` with IPV6_V6ONLY=true, which
+        // does NOT conflict with a 0.0.0.0 bind. Binding the blocker to 127.0.0.1 or
+        // 0.0.0.0 would let the daemon's listen succeed there and never hit EADDRINUSE.
         const blocker = net.createServer();
         const port = await new Promise<number>((resolve, reject) => {
             blocker.once("listening", () => {
@@ -24,7 +24,7 @@ describe("startDaemonServer bind contract", () => {
                 else reject(new Error(`unexpected address ${JSON.stringify(addr)}`));
             });
             blocker.once("error", reject);
-            blocker.listen(0, "0.0.0.0");
+            blocker.listen(0);
         });
 
         // Swallow any stray uncaughtException emitted by an unguarded server.listen()
