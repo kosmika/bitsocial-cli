@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.63 (2026-05-25)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.38 ([ee72947](https://github.com/bitsocialnet/bitsocial-cli/commit/ee72947))
+
 ## <small>0.19.62 (2026-05-24)</small>
 
 * test(daemon-server): bind blocker to 0.0.0.0 so EADDRINUSE fires on macOS/Windows ([0d90f0f](https://github.com/bitsocialnet/bitsocial-cli/commit/0d90f0f))
