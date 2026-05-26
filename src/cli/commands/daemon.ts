@@ -472,10 +472,6 @@ export default class Daemon extends Command {
                 }
             };
 
-            // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
-            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
-            await createOrConnectRpc();
-
             let keepKuboUpInterval: NodeJS.Timeout | undefined;
             const { asyncExitHook } = await import("exit-hook");
             const killKuboProcessGroup = (pid: number, signal: NodeJS.Signals) => {
@@ -570,6 +566,10 @@ export default class Daemon extends Command {
                     killKuboProcessGroup(kuboProcess.pid, "SIGKILL");
                 }
             });
+
+            // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
+            if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
+            await createOrConnectRpc();
 
             keepKuboUpInterval = setInterval(async () => {
                 if (mainProcessExited) return;
