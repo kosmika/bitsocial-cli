@@ -229,7 +229,8 @@ export default class Daemon extends Command {
     }
 
     async run() {
-        printBanner();
+        // Daemon output is often viewed through Docker/systemd logs where stdout is not a TTY.
+        printBanner({ forceColor: true });
         // Non-blocking update check — fire-and-forget, won't delay startup
         import("../../update/npm-registry.js")
             .then(({ fetchLatestVersion }) =>
