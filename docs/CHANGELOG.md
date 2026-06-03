@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.64 (2026-06-03)</small>
+
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.40 ([a19c8ac](https://github.com/bitsocialnet/bitsocial-cli/commit/a19c8ac))
+* fix(webui): strip 5chan root hash redirect ([82b53fc](https://github.com/bitsocialnet/bitsocial-cli/commit/82b53fc))
+* test(daemon): move RPC ports out of Linux ephemeral range to fix CI flake ([470d317](https://github.com/bitsocialnet/bitsocial-cli/commit/470d317))
+
 ## <small>0.19.63 (2026-05-25)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.38 ([ee72947](https://github.com/bitsocialnet/bitsocial-cli/commit/ee72947))
