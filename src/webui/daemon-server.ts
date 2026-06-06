@@ -45,7 +45,12 @@ async function _generateRpcAuthKeyIfNotExisting(pkcDataPath: string) {
 }
 
 // The daemon server will host both RPC and webui on the same port
-export async function startDaemonServer(rpcUrl: URL, ipfsGatewayUrl: URL, pkcOptions: any) {
+export async function startDaemonServer(
+    rpcUrl: URL,
+    ipfsGatewayUrl: URL,
+    pkcOptions: any,
+    rpcServerOptions?: { allowPrivateKeyExport?: boolean }
+) {
     // Start pkc-js RPC
     const log = PKCLogger("bitsocial-cli:daemon:startDaemonServer");
     const webuiExpressApp = express();
@@ -77,7 +82,8 @@ export async function startDaemonServer(rpcUrl: URL, ipfsGatewayUrl: URL, pkcOpt
     const rpcServer = await PKCRpc.default.PKCWsServer({
         server: httpServer,
         pkcOptions: pkcOptions,
-        authKey: rpcAuthKey
+        authKey: rpcAuthKey,
+        allowPrivateKeyExport: rpcServerOptions?.allowPrivateKeyExport
     });
 
     const webuisDir = path.join(__dirname, "..", "..", "dist", "webuis");
