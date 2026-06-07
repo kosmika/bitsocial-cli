@@ -1,5 +1,6 @@
 import { Args, Flags } from "@oclif/core";
 import { BaseCommand } from "../../base-command.js";
+import defaults from "../../../common-utils/defaults.js";
 import { PKCLogger } from "../../../util.js";
 
 import { createHash } from "node:crypto";
@@ -59,7 +60,7 @@ export default class Export extends BaseCommand {
         }),
         path: Flags.string({
             char: "o",
-            description: "Destination file for the downloaded snapshot (default: ./<address>.sqlite)"
+            description: "Destination file for the downloaded snapshot (default: <dataPath>/exports/<address>_<datetime>.sqlite)"
         }),
         includePrivateKey: Flags.boolean({
             default: false,
@@ -117,7 +118,10 @@ export default class Export extends BaseCommand {
             }
             const exportableCommunity = community as ExportableCommunity;
 
-            const destPath = path.resolve(flags.path ?? `${exportableCommunity.address}.sqlite`);
+            // Datetime in the filename matches the daemon log convention (ISO 8601 with ':' → '-')
+            // so repeated exports never collide and snapshots sort chronologically
+            const defaultFilename = `${exportableCommunity.address}_${new Date().toISOString().replace(/:/g, "-")}.sqlite`;
+            const destPath = path.resolve(flags.path ?? path.join(defaults.PKC_DATA_PATH, "exports", defaultFilename));
             const destExists = await fs
                 .stat(destPath)
                 .then(() => true)
