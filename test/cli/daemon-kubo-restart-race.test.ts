@@ -212,6 +212,84 @@ describe("daemon shutdown with a wedged kubo startup (issue #70, PR #71 review)"
     );
 });
 
+describe("daemon shutdown with a late signal-exit registrant (issue #70)", () => {
+    const SIGEXIT_RPC_URL = `ws://localhost:9748`;
+    const SIGEXIT_KUBO_URL = `http://0.0.0.0:50599/api/v0`;
+    const SIGEXIT_GATEWAY_URL = `http://0.0.0.0:7053`;
+    const SIGEXIT_KUBO_API_URL = `http://localhost:50599/api/v0`;
+
+    it.skipIf(process.platform === "win32")(
+        "kubo is killed on SIGTERM even when a signal-exit handler registered after the exit hook",
+        { timeout: 120000 },
+        async () => {
+            // Reproduces the CI failure mechanism: a dependency (e.g. @pkcprotocol/proper-lock-file,
+            // or the signal-exit copies under ink/restore-cursor) registers a signal-exit handler
+            // after the daemon's asyncExitHook. exit-hook uses process.once, so on SIGTERM its
+            // listener disappears as soon as it is invoked; signal-exit then sees only its own
+            // family left and re-raises the signal, killing the daemon while the async kubo
+            // cleanup is still parked — the restarted kubo outlives the daemon.
+            let daemonProcess: ManagedChildProcess | undefined;
+            try {
+                await ensureKuboNodeStopped(SIGEXIT_KUBO_API_URL);
+                daemonProcess = await startPkcDaemon(
+                    ["--pkcOptions.dataPath", randomDirectory(), "--pkcRpcUrl", SIGEXIT_RPC_URL],
+                    {
+                        KUBO_RPC_URL: SIGEXIT_KUBO_URL,
+                        IPFS_GATEWAY_URL: SIGEXIT_GATEWAY_URL,
+                        PKC_CLI_TEST_SIMULATE_LATE_SIGNAL_EXIT: "1",
+                        // Hold the restarted kubo's start promise so SIGTERM lands mid-start,
+                        // like the CI failure (SIGTERM 0.4s after the restarted kubo's API came up)
+                        PKC_CLI_TEST_IPFS_READY_DELAY_MS: "5000"
+                    }
+                );
+                expect(typeof daemonProcess.pid).toBe("number");
+
+                const shutdownRes = await fetch(`${SIGEXIT_KUBO_API_URL}/shutdown`, { method: "POST" });
+                expect(shutdownRes.status).toBe(200);
+
+                const kuboRestarted = await waitForCondition(
+                    async () => {
+                        try {
+                            const res = await fetch(`${SIGEXIT_KUBO_API_URL}/bitswap/stat`, { method: "POST" });
+                            return res.ok;
+                        } catch {
+                            return false;
+                        }
+                    },
+                    30000,
+                    500
+                );
+                expect(kuboRestarted).toBe(true);
+
+                const killed = daemonProcess.kill();
+                expect(killed).toBe(true);
+
+                const daemonExited = await waitForCondition(() => {
+                    return (daemonProcess?.exitCode ?? null) !== null || (daemonProcess?.signalCode ?? null) !== null;
+                }, 30000, 100);
+                expect(daemonExited).toBe(true);
+
+                const kuboStoppedAfterKill = await waitForCondition(
+                    async () => {
+                        try {
+                            const res = await fetch(`${SIGEXIT_KUBO_API_URL}/bitswap/stat`, { method: "POST" });
+                            return !res.ok;
+                        } catch {
+                            return true;
+                        }
+                    },
+                    10000,
+                    500
+                );
+                expect(kuboStoppedAfterKill).toBe(true);
+            } finally {
+                if (daemonProcess) await stopPkcDaemon(daemonProcess);
+                await ensureKuboNodeStopped(SIGEXIT_KUBO_API_URL);
+            }
+        }
+    );
+});
+
 describe("startKuboNode settles on failure (issue #70)", () => {
     let firstKubo: ChildProcessWithoutNullStreams | undefined;
 

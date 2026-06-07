@@ -623,6 +623,52 @@ export default class Daemon extends Command {
                 for (const pid of liveKuboPids) killKuboProcessGroup(pid, "SIGKILL");
             });
 
+            // Persistent signal guard (issue #70): exit-hook registers its SIGINT/SIGTERM handlers
+            // with process.once, so its listener vanishes from the listener list the moment a
+            // signal is dispatched. signal-exit (loaded by @pkcprotocol/proper-lock-file and other
+            // dependencies) re-raises the signal when every remaining listener is its own — which
+            // would kill the process while the async exit hook above is still shutting kubo down.
+            // A persistent non-signal-exit listener keeps that heuristic from ever firing.
+            // A repeated signal force-quits immediately (impatient Ctrl+C): process.exit triggers
+            // the emergency "exit" handler above, which SIGKILLs every live kubo.
+            let terminationSignalCount = 0;
+            for (const signal of ["SIGINT", "SIGTERM"] as const) {
+                process.on(signal, () => {
+                    terminationSignalCount++;
+                    if (terminationSignalCount >= 2) {
+                        log(`Received ${signal} again during shutdown, force-quitting`);
+                        process.exit(signal === "SIGINT" ? 130 : 143);
+                    }
+                });
+            }
+
+            // Test hook (issue #70): simulates a dependency registering a signal-exit handler
+            // AFTER the asyncExitHook above — what @pkcprotocol/proper-lock-file (and the
+            // signal-exit copies under ink/restore-cursor) do at module load. signal-exit
+            // re-raises the signal when every remaining listener belongs to the signal-exit
+            // family (`if (listeners.length === count) { ... process.kill(process.pid, s) }`),
+            // which kills the daemon while the async exit hook is still cleaning up kubo —
+            // exit-hook registers with process.once, so its listener is already gone by then.
+            if (process.env["PKC_CLI_TEST_SIMULATE_LATE_SIGNAL_EXIT"]) {
+                for (const signal of ["SIGINT", "SIGTERM"] as const) {
+                    // Real signal-exit copies only count each other as "family" (via a shared
+                    // global marker); any other listener makes them defer. Identify family by
+                    // source: signal-exit's dispatcher carries the "an exit is coming" comment.
+                    const isSignalExitFamily = (listener: NodeJS.SignalsListener) =>
+                        String(listener).includes("an exit is coming");
+                    const reRaiser = () => {
+                        const onlyFamilyLeft = process
+                            .listeners(signal)
+                            .every((listener) => listener === reRaiser || isSignalExitFamily(listener));
+                        if (onlyFamilyLeft) {
+                            process.removeListener(signal, reRaiser);
+                            process.kill(process.pid, signal);
+                        }
+                    };
+                    process.on(signal, reRaiser);
+                }
+            }
+
             // RPC port was already verified free above (fail-fast); only the kuboRpcClientsOptions branch skips local kubo.
             if (!pkcOptionsFromFlag?.kuboRpcClientsOptions) await keepKuboUp();
             await createOrConnectRpc();
