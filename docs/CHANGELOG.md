@@ -1,5 +1,16 @@
 # Changelog
 
+## <small>0.19.65 (2026-06-07)</small>
+
+* fix(banner): improve terminal contrast ([203e44c](https://github.com/bitsocialnet/bitsocial-cli/commit/203e44c))
+* fix(community): address CodeRabbit review on export command (#65) ([779a85f](https://github.com/bitsocialnet/bitsocial-cli/commit/779a85f)), closes [#65](https://github.com/bitsocialnet/bitsocial-cli/issues/65)
+* fix(daemon): register cleanup before startup ([0c1f6b3](https://github.com/bitsocialnet/bitsocial-cli/commit/0c1f6b3))
+* fix(daemon): stop express's catch-all 404 from clobbering /exports downloads ([0e40b4f](https://github.com/bitsocialnet/bitsocial-cli/commit/0e40b4f))
+* feat(community): add `bitsocial community export` command (#64) ([53821e4](https://github.com/bitsocialnet/bitsocial-cli/commit/53821e4)), closes [#64](https://github.com/bitsocialnet/bitsocial-cli/issues/64) [pkcprotocol/pkc-js#100](https://github.com/pkcprotocol/pkc-js/issues/100)
+* feat(community): default export destination to <dataPath>/exports/<address>_<datetime>.sqlite ([52c5ac1](https://github.com/bitsocialnet/bitsocial-cli/commit/52c5ac1))
+* feat(update): hint at `bitsocial logs --stdout` after restarting daemons ([2df026a](https://github.com/bitsocialnet/bitsocial-cli/commit/2df026a))
+* chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.41 ([b246b8b](https://github.com/bitsocialnet/bitsocial-cli/commit/b246b8b))
+
 ## <small>0.19.64 (2026-06-03)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.40 ([a19c8ac](https://github.com/bitsocialnet/bitsocial-cli/commit/a19c8ac))
