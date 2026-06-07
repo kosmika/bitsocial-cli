@@ -133,7 +133,11 @@ export default class Export extends BaseCommand {
                 this.error(`Export ${finishedRecord.exportId} finished but the RPC server did not provide a download URL`);
             }
 
-            await this._downloadAndVerify(finishedRecord, destPath, abortController.signal, flags.quiet);
+            // Mirrors pkc-js's rpcHttpOrigin: the ws[s]:// RPC URL with the protocol swapped to http[s]://
+            const parsedRpcUrl = new URL(flags.pkcRpcUrl.toString());
+            const expectedDownloadOrigin = `${parsedRpcUrl.protocol === "wss:" ? "https:" : "http:"}//${parsedRpcUrl.host}`;
+
+            await this._downloadAndVerify(finishedRecord, destPath, abortController.signal, flags.quiet, expectedDownloadOrigin);
 
             this.log(destPath);
         } catch (e) {
@@ -157,14 +161,25 @@ export default class Export extends BaseCommand {
 
         return new Promise<ExportRecord>((resolve, reject) => {
             let lastPrintedPercent = -1;
+            const cleanup = () => {
+                community.removeListener("exportschange", checkRecords);
+                signal.removeEventListener("abort", onAbort);
+            };
+            // Don't wait for the server's terminal ERR_EXPORT_CANCELLED record — it never arrives if the
+            // daemon died or the connection dropped. pkc-js's own abort listener (registered inside
+            // community.export(), before this one) already dispatched cancelExport() to the server.
+            const onAbort = () => {
+                cleanup();
+                reject(new Error("Export cancelled"));
+            };
             const checkRecords = (records: ExportRecord[]) => {
                 const record = records.find((rec) => rec.exportId === exportId);
                 if (!record) return;
                 if (record.error) {
-                    community.removeListener("exportschange", checkRecords);
+                    cleanup();
                     reject(new Error(`Export failed (${record.error.code}): ${record.error.message}`));
                 } else if (record.progress === 1) {
-                    community.removeListener("exportschange", checkRecords);
+                    cleanup();
                     this._printProgress(quiet, `\rExporting ${community.address}: 100%\n`);
                     resolve(record);
                 } else {
@@ -176,15 +191,25 @@ export default class Export extends BaseCommand {
                 }
             };
             community.on("exportschange", checkRecords);
+            signal.addEventListener("abort", onAbort, { once: true });
+            if (signal.aborted) return onAbort();
             // The terminal notification may have arrived before the listener was attached
             checkRecords(community.exports);
         });
     }
 
     /** Download the finished snapshot to destPath, verifying its sha256 against the export record. */
-    private async _downloadAndVerify(record: ExportRecord, destPath: string, signal: AbortSignal, quiet: boolean) {
-        this._printProgress(quiet, `Downloading snapshot from ${record.url}\n`);
-        const response = await fetch(record.url!, { signal });
+    private async _downloadAndVerify(record: ExportRecord, destPath: string, signal: AbortSignal, quiet: boolean, expectedOrigin: string) {
+        // The export download contract is GET <rpc-http-origin>/exports/<exportId> — refuse anything else
+        // so a misconfigured/compromised RPC server can't use the CLI to fetch arbitrary URLs
+        const downloadUrl = new URL(record.url!);
+        if (downloadUrl.origin !== expectedOrigin || !downloadUrl.pathname.startsWith("/exports/")) {
+            this.error(
+                `Refusing to download export from unexpected URL ${record.url} (expected ${expectedOrigin}/exports/<exportId>)`
+            );
+        }
+        this._printProgress(quiet, `Downloading snapshot from ${downloadUrl}\n`);
+        const response = await fetch(downloadUrl, { signal });
         if (!response.ok || !response.body) {
             this.error(`Failed to download export from ${record.url}: HTTP ${response.status}`);
         }
