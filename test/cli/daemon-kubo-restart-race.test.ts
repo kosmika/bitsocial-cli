@@ -14,7 +14,7 @@
 // The PKC_CLI_TEST_KEEPKUBOUP_PORTCHECK_DELAY_MS hook widens the guard->assignment window so
 // a watchdog tick deterministically lands inside it (same pattern as PKC_CLI_TEST_IPFS_READY_DELAY_MS).
 import { describe, it, expect, afterEach } from "vitest";
-import type { ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "child_process";
 import { directory as randomDirectory } from "tempy";
 import dns from "node:dns";
 import path from "path";
@@ -37,6 +37,11 @@ const RACE_KUBO_API_URL = `http://localhost:50299/api/v0`;
 
 const SETTLE_KUBO_API_URL = new URL(`http://127.0.0.1:50399/api/v0`);
 const SETTLE_GATEWAY_URL = new URL(`http://127.0.0.1:6853`);
+
+const WEDGE_RPC_URL = `ws://localhost:9648`;
+const WEDGE_KUBO_URL = new URL(`http://0.0.0.0:50499/api/v0`);
+const WEDGE_GATEWAY_URL = new URL(`http://0.0.0.0:6953`);
+const WEDGE_KUBO_API_URL = `http://localhost:50499/api/v0`;
 
 const killProcessGroup = (pid: number, signal: NodeJS.Signals) => {
     if (process.platform !== "win32") {
@@ -125,6 +130,83 @@ describe("daemon kubo restart race (issue #70)", () => {
             } finally {
                 if (daemonProcess) await stopPkcDaemon(daemonProcess);
                 await ensureKuboNodeStopped(RACE_KUBO_API_URL);
+            }
+        }
+    );
+});
+
+describe("daemon shutdown with a wedged kubo startup (issue #70, PR #71 review)", () => {
+    it.skipIf(process.platform === "win32")(
+        "SIGTERM during a kubo start that never completes must not block shutdown unboundedly",
+        { timeout: 240000 },
+        async () => {
+            // Simulate a kubo that spawns and serves its API but whose startKuboNode promise
+            // never settles within any reasonable horizon (kubo wedged before "Daemon is ready"
+            // from the daemon's point of view): hold the ready acknowledgement for 10 minutes.
+            const dataPath = randomDirectory();
+            await preInitKuboWithEphemeralSwarm(path.join(dataPath, ".bitsocial-cli.ipfs"), WEDGE_KUBO_URL, WEDGE_GATEWAY_URL);
+
+            let daemonProcess: ChildProcess | undefined;
+            try {
+                await ensureKuboNodeStopped(WEDGE_KUBO_API_URL);
+                daemonProcess = spawn(
+                    "node",
+                    ["./bin/run", "daemon", "--logPath", randomDirectory(), "--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", WEDGE_RPC_URL],
+                    {
+                        stdio: ["pipe", "pipe", "pipe"],
+                        env: {
+                            ...process.env,
+                            KUBO_RPC_URL: WEDGE_KUBO_URL.toString(),
+                            IPFS_GATEWAY_URL: WEDGE_GATEWAY_URL.toString(),
+                            PKC_CLI_TEST_IPFS_READY_DELAY_MS: "600000"
+                        }
+                    }
+                );
+                expect(typeof daemonProcess.pid).toBe("number");
+
+                // Wait until kubo is spawned and serving (daemon is now blocked inside the held
+                // startKuboNode promise; kuboProcess is tracked via onSpawn, pendingKuboStart pending)
+                const kuboUp = await waitForCondition(
+                    async () => {
+                        try {
+                            const res = await fetch(`${WEDGE_KUBO_API_URL}/version`, { method: "POST" });
+                            return res.ok;
+                        } catch {
+                            return false;
+                        }
+                    },
+                    60000,
+                    500
+                );
+                expect(kuboUp).toBe(true);
+
+                const killed = daemonProcess.kill();
+                expect(killed).toBe(true);
+
+                // Shutdown must reach the kill flow despite the pending start: the daemon should
+                // exit well before the exit hook's 120s hard cap force-kills the process.
+                const daemonExited = await waitForCondition(() => {
+                    return (daemonProcess?.exitCode ?? null) !== null || (daemonProcess?.signalCode ?? null) !== null;
+                }, 60000, 100);
+                expect(daemonExited).toBe(true);
+
+                const kuboStoppedAfterKill = await waitForCondition(
+                    async () => {
+                        try {
+                            const res = await fetch(`${WEDGE_KUBO_API_URL}/version`, { method: "POST" });
+                            return !res.ok;
+                        } catch {
+                            return true;
+                        }
+                    },
+                    10000,
+                    500
+                );
+                expect(kuboStoppedAfterKill).toBe(true);
+            } finally {
+                if (daemonProcess?.pid && daemonProcess.exitCode === null && daemonProcess.signalCode === null)
+                    killProcessGroup(daemonProcess.pid, "SIGKILL");
+                await ensureKuboNodeStopped(WEDGE_KUBO_API_URL);
             }
         }
     );

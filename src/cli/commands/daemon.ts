@@ -537,23 +537,19 @@ export default class Daemon extends Command {
             };
 
             const killKuboProcess = async () => {
-                // Wait for any in-flight start attempt so we kill the kubo it may still spawn.
-                // Both promises settle on all paths (issue #70): keepKuboUpOnce re-checks
-                // mainProcessExited after its awaits, and startKuboNode rejects on every failure.
-                if (keepKuboUpInFlight) {
-                    try {
-                        await keepKuboUpInFlight;
-                    } catch {
-                        /* ignore */
-                    }
-                }
-                if (pendingKuboStart) {
-                    try {
-                        await pendingKuboStart;
-                    } catch {
-                        /* ignore */
-                    }
-                }
+                // Wait (bounded) for any in-flight start attempt so we kill the kubo it may still
+                // spawn. Both promises settle on all failure paths (issue #70), but a spawned kubo
+                // that wedges before "Daemon is ready" without exiting keeps them pending — the
+                // bound ensures shutdown still reaches the SIGINT/SIGKILL flow below, which kills
+                // it via kuboProcess (set in onSpawn) or the liveKuboPids sweep (PR #71 review).
+                const inFlightStarts = [keepKuboUpInFlight, pendingKuboStart]
+                    .filter((promise) => promise !== undefined)
+                    .map((promise) => promise.catch(() => {}));
+                if (inFlightStarts.length > 0)
+                    await Promise.race([
+                        Promise.all(inFlightStarts),
+                        new Promise<void>((resolve) => setTimeout(resolve, 15_000).unref())
+                    ]);
                 if (kuboProcess?.pid && !kuboProcess.killed) {
                     const pid = kuboProcess.pid;
                     log("Attempting to kill kubo process with pid", pid);
