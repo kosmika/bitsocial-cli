@@ -45,10 +45,27 @@ async function _generateRpcAuthKeyIfNotExisting(pkcDataPath: string) {
 }
 
 // The daemon server will host both RPC and webui on the same port
-export async function startDaemonServer(rpcUrl: URL, ipfsGatewayUrl: URL, pkcOptions: any) {
+export async function startDaemonServer(
+    rpcUrl: URL,
+    ipfsGatewayUrl: URL,
+    pkcOptions: any,
+    rpcServerOptions?: { allowPrivateKeyExport?: boolean }
+) {
     // Start pkc-js RPC
     const log = PKCLogger("bitsocial-cli:daemon:startDaemonServer");
     const webuiExpressApp = express();
+    // GET /exports/<exportId> is streamed by pkc-js's own request listener, attached to this same
+    // http.Server inside PKCWsServer. Express must stay silent for those paths — its catch-all 404
+    // races the async pkc-js handler and clobbers the download (the CLI's `community export` would
+    // see HTTP 404). Other /exports/ paths fall through to express's 404 because pkc-js ignores
+    // them on a caller-supplied server and the request would otherwise hang unanswered.
+    // NOT mounted at "/exports": a mounted middleware strips the mount prefix from the shared
+    // req.url while the request is held, so pkc-js's listener would no longer recognize it.
+    webuiExpressApp.use((req, res, next) => {
+        const isExportDownload = /^\/exports\/[0-9a-fA-F-]{36}$/.test(req.path);
+        if (!isExportDownload) return next();
+        // intentionally neither responds nor calls next(): pkc-js's listener owns this request
+    });
     // Wait for bind to actually complete before returning. Calling express.listen() without
     // awaiting 'listening' lets startup proceed before the port is accepting connections,
     // and without an 'error' handler a bind failure becomes an uncaughtException that kills
@@ -77,7 +94,8 @@ export async function startDaemonServer(rpcUrl: URL, ipfsGatewayUrl: URL, pkcOpt
     const rpcServer = await PKCRpc.default.PKCWsServer({
         server: httpServer,
         pkcOptions: pkcOptions,
-        authKey: rpcAuthKey
+        authKey: rpcAuthKey,
+        allowPrivateKeyExport: rpcServerOptions?.allowPrivateKeyExport
     });
 
     const webuisDir = path.join(__dirname, "..", "..", "dist", "webuis");

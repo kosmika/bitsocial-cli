@@ -1,7 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import net from "net";
 import { directory as randomDirectory } from "tempy";
 import { startDaemonServer } from "../../dist/webui/daemon-server.js";
+
+// Intercept the PKCWsServer constructor so the plumbing tests below can assert the exact
+// options startDaemonServer passes to it, without booting a real pkc instance.
+// The bind-contract test is unaffected: it rejects before the RPC server is created.
+const { pkcWsServerFake } = vi.hoisted(() => ({ pkcWsServerFake: vi.fn() }));
+vi.mock("@pkcprotocol/pkc-js/rpc", () => ({ default: { PKCWsServer: pkcWsServerFake } }));
 
 // Regression test for issue #42:
 // startDaemonServer used to call webuiExpressApp.listen(port) fire-and-forget — no
@@ -47,6 +53,99 @@ describe("startDaemonServer bind contract", () => {
         } finally {
             process.off("uncaughtException", uncaughtHandler);
             await new Promise<void>((resolve) => blocker.close(() => resolve()));
+        }
+    });
+});
+
+// Regression coverage for the `daemon --allowPrivateKeyExport` plumbing added with
+// `community export` (PR #65): the flag must reach the pkc-js RPC server verbatim,
+// otherwise --no-allowPrivateKeyExport silently stops protecting the private key.
+describe("startDaemonServer → PKCWsServer plumbing", () => {
+    beforeEach(() => {
+        pkcWsServerFake.mockReset();
+        pkcWsServerFake.mockResolvedValue({
+            pkc: { communities: [] },
+            destroy: vi.fn(async () => {})
+        });
+    });
+
+    const startOnRandomPort = (rpcServerOptions?: { allowPrivateKeyExport?: boolean }) =>
+        startDaemonServer(
+            new URL("ws://127.0.0.1:0"), // port 0 → ephemeral port, no collisions
+            new URL("http://127.0.0.1:6754"),
+            { dataPath: randomDirectory() },
+            rpcServerOptions
+        );
+
+    it("passes allowPrivateKeyExport: false through to PKCWsServer", async () => {
+        const daemonServer = await startOnRandomPort({ allowPrivateKeyExport: false });
+        try {
+            expect(pkcWsServerFake).toHaveBeenCalledTimes(1);
+            expect(pkcWsServerFake.mock.calls[0][0].allowPrivateKeyExport).toBe(false);
+        } finally {
+            await daemonServer.destroy();
+        }
+    });
+
+    it("passes allowPrivateKeyExport: true through to PKCWsServer", async () => {
+        const daemonServer = await startOnRandomPort({ allowPrivateKeyExport: true });
+        try {
+            expect(pkcWsServerFake).toHaveBeenCalledTimes(1);
+            expect(pkcWsServerFake.mock.calls[0][0].allowPrivateKeyExport).toBe(true);
+        } finally {
+            await daemonServer.destroy();
+        }
+    });
+
+    it("leaves allowPrivateKeyExport undefined (pkc-js default) when no rpcServerOptions are given", async () => {
+        const daemonServer = await startOnRandomPort();
+        try {
+            expect(pkcWsServerFake).toHaveBeenCalledTimes(1);
+            expect(pkcWsServerFake.mock.calls[0][0].allowPrivateKeyExport).toBeUndefined();
+        } finally {
+            await daemonServer.destroy();
+        }
+    });
+
+    it("does not 404 GET /exports/<exportId> — the PKCWsServer request listener owns it", async () => {
+        // Regression: express's catch-all 404 raced pkc-js's async /exports handler on the shared
+        // http.Server and clobbered the download — a live `community export` failed with HTTP 404
+        // even though the export itself succeeded on the daemon.
+        const exportId = "11111111-2222-3333-4444-555555555555";
+        let boundPort: number | undefined;
+        pkcWsServerFake.mockImplementation(async (options: { server: import("http").Server }) => {
+            boundPort = (options.server.address() as import("net").AddressInfo).port;
+            // Mimic pkc-js: attach a request listener that streams export downloads and stays
+            // silent for every other path on a caller-supplied server. The delay mirrors the
+            // async fs work the real handler does before writing headers — that latency is what
+            // loses the race against express's synchronous catch-all 404.
+            options.server.on("request", (req, res) => {
+                if (req.url === `/exports/${exportId}` && req.method === "GET") {
+                    setTimeout(() => {
+                        if (res.writableEnded) return; // someone else (express's 404) already answered
+                        res.statusCode = 200;
+                        res.end("fake snapshot");
+                    }, 20);
+                }
+            });
+            return { pkc: { communities: [] }, destroy: vi.fn(async () => {}) };
+        });
+
+        const daemonServer = await startOnRandomPort();
+        try {
+            // The export download must reach pkc-js's listener, not express's 404
+            const download = await fetch(`http://127.0.0.1:${boundPort}/exports/${exportId}`);
+            expect(download.status).toBe(200);
+            expect(await download.text()).toBe("fake snapshot");
+
+            // Paths under /exports/ that pkc-js ignores must still get express's 404
+            // instead of hanging with no response
+            const nonDownload = await fetch(`http://127.0.0.1:${boundPort}/exports/not-a-uuid`, {
+                signal: AbortSignal.timeout(5000)
+            });
+            expect(nonDownload.status).toBe(404);
+        } finally {
+            await daemonServer.destroy();
         }
     });
 });

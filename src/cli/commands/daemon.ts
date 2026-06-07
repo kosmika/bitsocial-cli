@@ -107,6 +107,13 @@ export default class Daemon extends Command {
             description: "RPC URL(s) for .bso name resolution. Can be specified multiple times.",
             multiple: true,
             default: DEFAULT_PROVIDERS
+        }),
+
+        allowPrivateKeyExport: Flags.boolean({
+            description:
+                "Allow RPC clients to request community exports that include the community signer's private key (`bitsocial community export --includePrivateKey`). Disable with --no-allowPrivateKeyExport when exposing the RPC to untrusted clients",
+            allowNo: true,
+            default: true
         })
     };
 
@@ -116,6 +123,7 @@ export default class Daemon extends Command {
         "bitsocial daemon --pkcOptions.dataPath /tmp/bitsocial-datapath/",
         "bitsocial daemon --pkcOptions.kuboRpcClientsOptions[0] https://remoteipfsnode.com",
         "bitsocial daemon --chainProviderUrls https://mainnet.infura.io/v3/YOUR_KEY",
+        "bitsocial daemon --no-allowPrivateKeyExport",
     ];
 
     private _setupLogger(Logger: PKCLoggerType) {
@@ -446,7 +454,9 @@ export default class Daemon extends Command {
                 const loadedChallenges = await loadChallengesIntoPKC(mergedPkcOptions.dataPath);
                 if (loadedChallenges.length > 0) console.log(`Loaded challenge packages: ${loadedChallenges.join(", ")}`);
 
-                daemonServer = await startDaemonServer(pkcRpcUrl, ipfsGatewayEndpoint, mergedPkcOptions);
+                daemonServer = await startDaemonServer(pkcRpcUrl, ipfsGatewayEndpoint, mergedPkcOptions, {
+                    allowPrivateKeyExport: flags.allowPrivateKeyExport
+                });
 
                 startedOwnRpc = true;
                 console.log(`pkc rpc: listening on ${pkcRpcUrl} (local connections only)`);
