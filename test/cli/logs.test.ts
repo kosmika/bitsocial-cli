@@ -55,6 +55,67 @@ const runBitsocialLogs = (args: string[], logDir: string): Promise<{ stdout: str
 const buildLogLine = (date: Date, message: string, stream?: "stdout" | "stderr") =>
     stream ? `[${date.toISOString()}] [${stream}] ${message}` : `[${date.toISOString()}] ${message}`;
 
+// Drive a `bitsocial logs -f ...` process by observing its output. `onChunk` runs on every stdout
+// chunk (use it to trigger file writes once a marker appears). The process is SIGINT-killed as soon
+// as `doneWhen(stdout, stderr)` returns true — plus an optional `graceMs` afterwards so any late or
+// erroneously-unfiltered output can still surface — or after `maxMs` as a safety cap. Anchoring the
+// kill to observed output rather than a fixed wall-clock window from spawn keeps these tests robust
+// on slow/loaded CI runners, where CLI cold-start alone can consume several seconds and a fixed
+// window would kill the process before the awaited line is ever emitted (issue #77).
+const runFollowUntil = (
+    args: string[],
+    logDir: string,
+    opts: {
+        onChunk?: (stdout: string) => void;
+        doneWhen: (stdout: string, stderr: string) => boolean;
+        graceMs?: number;
+        maxMs?: number;
+    }
+): Promise<{ stdout: string; stderr: string }> => {
+    const { onChunk, doneWhen, graceMs = 0, maxMs = 25000 } = opts;
+    return new Promise((resolve, reject) => {
+        const proc = spawn("node", ["./bin/run", "logs", "--logPath", logDir, ...args], {
+            stdio: ["pipe", "pipe", "pipe"]
+        });
+
+        let stdout = "";
+        let stderr = "";
+        let killed = false;
+        let finishing = false;
+        const kill = () => {
+            if (killed) return;
+            killed = true;
+            proc.kill("SIGINT");
+        };
+        const safety = setTimeout(kill, maxMs);
+        const maybeFinish = () => {
+            if (finishing || killed) return;
+            if (doneWhen(stdout, stderr)) {
+                finishing = true;
+                if (graceMs > 0) setTimeout(kill, graceMs);
+                else kill();
+            }
+        };
+        proc.stdout.on("data", (data: Buffer) => {
+            stdout += data.toString();
+            onChunk?.(stdout);
+            maybeFinish();
+        });
+        proc.stderr.on("data", (data: Buffer) => {
+            stderr += data.toString();
+            maybeFinish();
+        });
+        proc.on("close", () => {
+            clearTimeout(safety);
+            resolve({ stdout, stderr });
+        });
+        proc.on("error", (err) => {
+            clearTimeout(safety);
+            reject(err);
+        });
+    });
+};
+
 describe("bitsocial logs (synthetic log file tests)", () => {
     let logDir: string;
     let logFile: string;
@@ -338,38 +399,17 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
         const file1 = path.join(logDir, "bitsocial_cli_daemon_2026-03-01T00-00-00.000Z.log");
         await fsPromise.writeFile(file1, buildLogLine(new Date("2026-03-01T00:00:00.000Z"), "INITIAL_MARKER") + "\n");
 
-        const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-            const proc = spawn("node", ["./bin/run", "logs", "--logPath", logDir, "-f"], {
-                stdio: ["pipe", "pipe", "pipe"]
-            });
-
-            let stdout = "";
-            let stderr = "";
-            let createdNewFile = false;
-            proc.stdout.on("data", (data: Buffer) => {
-                stdout += data.toString();
-                // Wait for initial output before creating the new file
+        let createdNewFile = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            // Wait for initial output before creating the new file
+            onChunk: (stdout) => {
                 if (!createdNewFile && stdout.includes("INITIAL_MARKER")) {
                     createdNewFile = true;
                     const file2 = path.join(logDir, "bitsocial_cli_daemon_2026-03-01T01-00-00.000Z.log");
                     fsPromise.writeFile(file2, buildLogLine(new Date("2026-03-01T01:00:00.000Z"), "NEW_FILE_MARKER") + "\n");
                 }
-            });
-            proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
-
-            // Wait long enough for the 3-second new-file check to fire, then kill
-            const timer = setTimeout(() => {
-                proc.kill("SIGINT");
-            }, 8000);
-
-            proc.on("close", () => {
-                clearTimeout(timer);
-                resolve({ stdout, stderr });
-            });
-            proc.on("error", (err) => {
-                clearTimeout(timer);
-                reject(err);
-            });
+            },
+            doneWhen: (stdout, stderr) => stdout.includes("NEW_FILE_MARKER") && stderr.includes("switched to new log file")
         });
 
         expect(result.stdout).toContain("INITIAL_MARKER");
@@ -382,16 +422,9 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
         const file1 = path.join(logDir, "bitsocial_cli_daemon_2026-04-01T00-00-00.000Z.log");
         await fsPromise.writeFile(file1, buildLogLine(new Date("2026-04-01T00:00:00.000Z"), "initial stdout", "stdout") + "\n");
 
-        const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-            const proc = spawn("node", ["./bin/run", "logs", "--logPath", logDir, "--stdout", "-f"], {
-                stdio: ["pipe", "pipe", "pipe"]
-            });
-
-            let stdout = "";
-            let stderr = "";
-            let createdNewFile = false;
-            proc.stdout.on("data", (data: Buffer) => {
-                stdout += data.toString();
+        let createdNewFile = false;
+        const result = await runFollowUntil(["--stdout", "-f"], logDir, {
+            onChunk: (stdout) => {
                 if (!createdNewFile && stdout.includes("initial stdout")) {
                     createdNewFile = true;
                     const file2 = path.join(logDir, "bitsocial_cli_daemon_2026-04-01T01-00-00.000Z.log");
@@ -401,21 +434,11 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
                     ].join("\n") + "\n";
                     fsPromise.writeFile(file2, content);
                 }
-            });
-            proc.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
-
-            const timer = setTimeout(() => {
-                proc.kill("SIGINT");
-            }, 8000);
-
-            proc.on("close", () => {
-                clearTimeout(timer);
-                resolve({ stdout, stderr });
-            });
-            proc.on("error", (err) => {
-                clearTimeout(timer);
-                reject(err);
-            });
+            },
+            doneWhen: (stdout) => stdout.includes("new stdout msg"),
+            // Both lines are written together; grace period lets an erroneously-unfiltered
+            // stderr line surface before we kill, so the negative assertion stays meaningful.
+            graceMs: 1000
         });
 
         expect(result.stdout).toContain("initial stdout");
@@ -428,34 +451,16 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
         const file1 = path.join(logDir, "bitsocial_cli_daemon_2026-05-01T00-00-00.000Z.log");
         await fsPromise.writeFile(file1, buildLogLine(new Date("2026-05-01T00:00:00.000Z"), "initial line") + "\n");
 
-        const result = await new Promise<{ stdout: string }>((resolve, reject) => {
-            const proc = spawn("node", ["./bin/run", "logs", "--logPath", logDir, "-f"], {
-                stdio: ["pipe", "pipe", "pipe"]
-            });
-
-            let stdout = "";
-            let appended = false;
-            proc.stdout.on("data", (data: Buffer) => {
-                stdout += data.toString();
-                // Only append after initial line has been observed, so CLI startup time doesn't matter
+        let appended = false;
+        const result = await runFollowUntil(["-f"], logDir, {
+            // Only append after initial line has been observed, so CLI startup time doesn't matter
+            onChunk: (stdout) => {
                 if (!appended && stdout.includes("initial line")) {
                     appended = true;
                     fsPromise.appendFile(file1, buildLogLine(new Date("2026-05-01T00:01:00.000Z"), "APPENDED_LINE") + "\n");
                 }
-            });
-
-            const timer = setTimeout(() => {
-                proc.kill("SIGINT");
-            }, 8000);
-
-            proc.on("close", () => {
-                clearTimeout(timer);
-                resolve({ stdout });
-            });
-            proc.on("error", (err) => {
-                clearTimeout(timer);
-                reject(err);
-            });
+            },
+            doneWhen: (stdout) => stdout.includes("APPENDED_LINE")
         });
 
         expect(result.stdout).toContain("initial line");

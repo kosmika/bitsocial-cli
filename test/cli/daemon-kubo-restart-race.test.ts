@@ -247,6 +247,11 @@ describe("daemon shutdown with a late signal-exit registrant (issue #70)", () =>
                 const shutdownRes = await fetch(`${SIGEXIT_KUBO_API_URL}/shutdown`, { method: "POST" });
                 expect(shutdownRes.status).toBe(200);
 
+                // This is a setup precondition, not the assertion under test: after /shutdown the
+                // daemon must auto-restart kubo before we can verify it dies on SIGTERM. The detect
+                // window must absorb the injected PKC_CLI_TEST_IPFS_READY_DELAY_MS (5s) plus restart
+                // time on a heavily-loaded CI runner — locally this lands in ~13s, but ubuntu CI has
+                // been observed taking >30s, so widen to 60s (well within the test's 120s cap, issue #77).
                 const kuboRestarted = await waitForCondition(
                     async () => {
                         try {
@@ -256,7 +261,7 @@ describe("daemon shutdown with a late signal-exit registrant (issue #70)", () =>
                             return false;
                         }
                     },
-                    30000,
+                    60000,
                     500
                 );
                 expect(kuboRestarted).toBe(true);
