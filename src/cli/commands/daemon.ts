@@ -19,7 +19,7 @@ import { printBanner } from "../ascii-banner.js";
 import { loadChallengesIntoPKC, formatChallengeNameVersion } from "../../challenge-packages/challenge-utils.js";
 import { migrateDataDirectory } from "../../common-utils/data-migration.js";
 import { createBsoResolvers, DEFAULT_PROVIDERS } from "../../common-utils/resolvers.js";
-import { pruneStaleStates, writeDaemonState, deleteDaemonState } from "../../common-utils/daemon-state.js";
+import { pruneStaleStates, writeDaemonState, deleteDaemonState, DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../common-utils/daemon-state.js";
 import { createDaemonFileLogger, type DaemonFileLogger } from "../../common-utils/daemon-file-logger.js";
 import fs from "fs";
 import fsPromise from "fs/promises";
@@ -538,6 +538,16 @@ export default class Daemon extends Command {
             };
 
             const killKuboProcess = async () => {
+                // Test hook (issue #70): hold off the kubo teardown for a fixed delay so a test can
+                // deterministically reproduce the window where the daemon's RPC port is already free
+                // (daemonServer.destroy() runs in parallel) but kubo is still alive and bound. This is
+                // exactly the window `update install` must not restart into — see
+                // test/cli/update-install-restart-race.test.ts. The daemon process stays alive for the
+                // duration because the exit hook awaits killKuboProcess() before exiting.
+                const kuboShutdownDelayRaw = process.env["PKC_CLI_TEST_KUBO_SHUTDOWN_DELAY_MS"];
+                const kuboShutdownDelay = kuboShutdownDelayRaw ? Number(kuboShutdownDelayRaw) : 0;
+                if (Number.isFinite(kuboShutdownDelay) && kuboShutdownDelay > 0)
+                    await new Promise((resolve) => setTimeout(resolve, kuboShutdownDelay));
                 // Wait (bounded) for any in-flight start attempt so we kill the kubo it may still
                 // spawn. Both promises settle on all failure paths (issue #70), but a spawned kubo
                 // that wedges before "Daemon is ready" without exiting keeps them pending — the
@@ -611,7 +621,7 @@ export default class Daemon extends Command {
 
                     await kuboKillPromise;
                 },
-                { wait: 120000 } // could take two minutes to shut down
+                { wait: DAEMON_SHUTDOWN_TIMEOUT_MS } // could take two minutes to shut down
             );
 
             // Emergency cleanup: if the process force-exits (e.g. double Ctrl+C),

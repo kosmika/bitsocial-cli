@@ -122,7 +122,14 @@ describe("daemon-state", () => {
     // and on the host PID 8 belongs to a kernel thread — an alive but unrelated process. The
     // bare `process.kill(pid, 0)` liveness check passed, so `update install` SIGINT'd the
     // unrelated process and restarted the daemon twice on the same port.
-    describe("getAliveDaemonStates — PID reused by an unrelated process", () => {
+    //
+    // Skipped on Windows: the PID-reuse scenario (issue #66) is a Docker-on-Linux problem
+    // (a container PID colliding with a host kernel thread), and the identity check that
+    // detects it relies on Unix process introspection (/proc, `ps`) plus Unix tooling
+    // (`sleep`, `bash`). On Windows the identity is undeterminable, so the code intentionally
+    // degrades to liveness-only — the conservative, safe fallback. There is nothing
+    // Windows-specific to assert here.
+    describe.skipIf(process.platform === "win32")("getAliveDaemonStates — PID reused by an unrelated process", () => {
         const DAEMON_STATES_DIR = path.join(defaults.PKC_DATA_PATH, ".daemon_states");
         let child: ChildProcess | undefined;
 
