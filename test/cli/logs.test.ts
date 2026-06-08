@@ -71,7 +71,7 @@ const runFollowUntil = (
         graceMs?: number;
         maxMs?: number;
     }
-): Promise<{ stdout: string; stderr: string }> => {
+): Promise<{ stdout: string; stderr: string; timedOut: boolean }> => {
     const { onChunk, doneWhen, graceMs = 0, maxMs = 25000 } = opts;
     return new Promise((resolve, reject) => {
         const proc = spawn("node", ["./bin/run", "logs", "--logPath", logDir, ...args], {
@@ -82,12 +82,16 @@ const runFollowUntil = (
         let stderr = "";
         let killed = false;
         let finishing = false;
+        let timedOut = false;
         const kill = () => {
             if (killed) return;
             killed = true;
             proc.kill("SIGINT");
         };
-        const safety = setTimeout(kill, maxMs);
+        const safety = setTimeout(() => {
+            timedOut = true;
+            kill();
+        }, maxMs);
         const maybeFinish = () => {
             if (finishing || killed) return;
             if (doneWhen(stdout, stderr)) {
@@ -107,7 +111,7 @@ const runFollowUntil = (
         });
         proc.on("close", () => {
             clearTimeout(safety);
-            resolve({ stdout, stderr });
+            resolve({ stdout, stderr, timedOut });
         });
         proc.on("error", (err) => {
             clearTimeout(safety);
@@ -452,16 +456,35 @@ describe("bitsocial logs -f log file rotation (synthetic)", () => {
         await fsPromise.writeFile(file1, buildLogLine(new Date("2026-05-01T00:00:00.000Z"), "initial line") + "\n");
 
         let appended = false;
+        let appendError: unknown;
         const result = await runFollowUntil(["-f"], logDir, {
             // Only append after initial line has been observed, so CLI startup time doesn't matter
             onChunk: (stdout) => {
                 if (!appended && stdout.includes("initial line")) {
                     appended = true;
-                    fsPromise.appendFile(file1, buildLogLine(new Date("2026-05-01T00:01:00.000Z"), "APPENDED_LINE") + "\n");
+                    fsPromise
+                        .appendFile(file1, buildLogLine(new Date("2026-05-01T00:01:00.000Z"), "APPENDED_LINE") + "\n")
+                        .catch((err) => {
+                            appendError = err;
+                        });
                 }
             },
             doneWhen: (stdout) => stdout.includes("APPENDED_LINE")
         });
+
+        if (!result.stdout.includes("APPENDED_LINE")) {
+            // Diagnostics for the flaky-on-CI failure (issue #77): the test waited the full safety cap
+            // without ever seeing APPENDED_LINE. Distinguish the three possible causes so the next CI
+            // run is conclusive instead of a guess:
+            //   - append never reached disk  -> appendTriggered/appendError + on-disk content show it
+            //   - logs -f never detected it  -> on-disk has APPENDED_LINE but captured stdout does not
+            //   - output truncated on exit   -> timedOut true and the line is on disk but not captured
+            const onDisk = await fsPromise.readFile(file1, "utf-8").catch((err) => `<read failed: ${err}>`);
+            console.log(`[follow-append diagnostics] timedOut=${result.timedOut} appendTriggered=${appended} appendError=${String(appendError)}`);
+            console.log(`[follow-append diagnostics] file1 on disk (${file1}):\n${onDisk}`);
+            console.log(`[follow-append diagnostics] captured stdout (${result.stdout.length} bytes):\n${JSON.stringify(result.stdout)}`);
+            console.log(`[follow-append diagnostics] captured stderr:\n${JSON.stringify(result.stderr)}`);
+        }
 
         expect(result.stdout).toContain("initial line");
         expect(result.stdout).toContain("APPENDED_LINE");
