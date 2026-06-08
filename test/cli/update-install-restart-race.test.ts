@@ -165,6 +165,10 @@ describe("bitsocial update install restart race (issue #70)", async () => {
                 PKC_CLI_TEST_RESTART_MARKER: markerFile
             });
 
+            // The command itself must have succeeded — a non-zero exit means the restart path
+            // failed even if the marker observations happen to look right.
+            expect(result.exitCode, `update install output:\n${result.stdout}\n${result.stderr}`).toBe(0);
+
             const marker = await fs.readFile(markerFile, "utf-8").catch(() => "");
             const observations = marker.trim().split("\n").filter(Boolean);
 
