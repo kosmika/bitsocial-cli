@@ -1,5 +1,17 @@
 # Changelog
 
+## <small>0.19.67 (2026-06-09)</small>
+
+* fix(logs): close race that dropped appends in -f follow mode (issue #77) ([d0e5e40](https://github.com/bitsocialnet/bitsocial-cli/commit/d0e5e40)), closes [#77](https://github.com/bitsocialnet/bitsocial-cli/issues/77) [#77](https://github.com/bitsocialnet/bitsocial-cli/issues/77)
+* fix(update): align restart wait budget with daemon shutdown budget ([8680386](https://github.com/bitsocialnet/bitsocial-cli/commit/8680386))
+* fix(update): wait for daemon process exit, not RPC port, before restart (issue #70) ([73458b4](https://github.com/bitsocialnet/bitsocial-cli/commit/73458b4)), closes [#70](https://github.com/bitsocialnet/bitsocial-cli/issues/70)
+* test: add diagnostics to logs -f append-follow test (issue #77) ([c26e21f](https://github.com/bitsocialnet/bitsocial-cli/commit/c26e21f)), closes [#77](https://github.com/bitsocialnet/bitsocial-cli/issues/77) [#77](https://github.com/bitsocialnet/bitsocial-cli/issues/77)
+* test: deflake logs -f follow tests and kubo restart-race detect window ([89371c6](https://github.com/bitsocialnet/bitsocial-cli/commit/89371c6)), closes [#77](https://github.com/bitsocialnet/bitsocial-cli/issues/77)
+* test: fix diagnostics gap + widen restart window in kubo cleanup test ([4ae1b1e](https://github.com/bitsocialnet/bitsocial-cli/commit/4ae1b1e)), closes [#77](https://github.com/bitsocialnet/bitsocial-cli/issues/77)
+* test(daemon-state): skip PID-reuse identity tests on Windows ([f3f403c](https://github.com/bitsocialnet/bitsocial-cli/commit/f3f403c)), closes [#66](https://github.com/bitsocialnet/bitsocial-cli/issues/66)
+* test(kubo): retry RPC+gateway integration startup on port race ([475a943](https://github.com/bitsocialnet/bitsocial-cli/commit/475a943))
+* test(update): assert update install exits 0 before checking restart marker ([3c986e0](https://github.com/bitsocialnet/bitsocial-cli/commit/3c986e0))
+
 ## <small>0.19.66 (2026-06-08)</small>
 
 * fix(daemon-state): detect PID reuse so stale state files aren't treated as live daemons (#66) ([fe3609e](https://github.com/bitsocialnet/bitsocial-cli/commit/fe3609e)), closes [#66](https://github.com/bitsocialnet/bitsocial-cli/issues/66)
