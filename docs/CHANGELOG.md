@@ -1,5 +1,9 @@
 # Changelog
 
+## <small>0.19.68 (2026-06-09)</small>
+
+* chore(deps): upgrade kubo 0.41.0 -> 0.42.0 (issue #80) ([5659d37](https://github.com/bitsocialnet/bitsocial-cli/commit/5659d37)), closes [#80](https://github.com/bitsocialnet/bitsocial-cli/issues/80)
+
 ## <small>0.19.67 (2026-06-09)</small>
 
 * fix(logs): close race that dropped appends in -f follow mode (issue #77) ([d0e5e40](https://github.com/bitsocialnet/bitsocial-cli/commit/d0e5e40)), closes [#77](https://github.com/bitsocialnet/bitsocial-cli/issues/77) [#77](https://github.com/bitsocialnet/bitsocial-cli/issues/77)
