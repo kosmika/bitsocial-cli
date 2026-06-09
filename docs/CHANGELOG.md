@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.71 (2026-06-09)</small>
+
+* fix(update): restart systemd-managed daemons via their supervisor (#82) ([49a7026](https://github.com/bitsocialnet/bitsocial-cli/commit/49a7026)), closes [#82](https://github.com/bitsocialnet/bitsocial-cli/issues/82) [#82](https://github.com/bitsocialnet/bitsocial-cli/issues/82)
+* test: dynamically allocate kubo/daemon ports with bind-race retry (#87) ([8e1e407](https://github.com/bitsocialnet/bitsocial-cli/commit/8e1e407)), closes [#87](https://github.com/bitsocialnet/bitsocial-cli/issues/87)
+* test: fix Windows swarm 4001 collision + address CodeRabbit review (#87) ([bb891cb](https://github.com/bitsocialnet/bitsocial-cli/commit/bb891cb)), closes [#87](https://github.com/bitsocialnet/bitsocial-cli/issues/87)
+
 ## <small>0.19.70 (2026-06-09)</small>
 
 * chore(deps): upgrade @pkcprotocol/pkc-js to 0.0.45 ([7a3d0a5](https://github.com/bitsocialnet/bitsocial-cli/commit/7a3d0a5))
