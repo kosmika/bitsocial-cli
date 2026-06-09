@@ -22,6 +22,7 @@ import {
     waitForKuboReady,
     waitForPortFree
 } from "../helpers/daemon-helpers.js";
+import { preInitKuboWithEphemeralSwarm } from "../helpers/kubo-helpers.js";
 dns.setDefaultResultOrder("ipv4first"); // to be able to resolve localhost
 
 // Ports are allocated dynamically per test (issue #87): the API ports this file used to pin fell in
@@ -54,7 +55,22 @@ const startPkcDaemonCapturingStderr = (args: string[], env?: Record<string, stri
         const hasCustomDataPath = args.some((arg) => arg.startsWith("--pkcOptions.dataPath"));
         const hasCustomLogPath = args.some((arg) => arg === "--logPath");
         const logPathArgs = hasCustomLogPath ? [] : ["--logPath", randomDirectory()];
-        const daemonArgs = hasCustomDataPath ? args : ["--pkcOptions.dataPath", randomDirectory(), ...args];
+        const dataPath = hasCustomDataPath
+            ? (args[args.findIndex((a) => a.startsWith("--pkcOptions.dataPath")) + 1] as string)
+            : randomDirectory();
+        const daemonArgs = hasCustomDataPath ? args : ["--pkcOptions.dataPath", dataPath, ...args];
+
+        // Pre-init kubo with an ephemeral swarm port (like startPkcDaemon) so this daemon doesn't
+        // bind swarm 4001 — otherwise a kubo lingering from a previous test (on Windows, where the
+        // daemon's kill doesn't take kubo with it) collides on 4001 with the next daemon (issue #87).
+        if (env?.KUBO_RPC_URL && env?.IPFS_GATEWAY_URL) {
+            try {
+                await preInitKuboWithEphemeralSwarm(path.join(dataPath, ".bitsocial-cli.ipfs"), new URL(env.KUBO_RPC_URL), new URL(env.IPFS_GATEWAY_URL));
+            } catch (error) {
+                return reject(error);
+            }
+        }
+
         const daemonProcess = spawn("node", ["./bin/run", "daemon", ...logPathArgs, ...daemonArgs], {
             stdio: ["pipe", "pipe", "pipe"],
             env: env ? { ...process.env, ...env } : undefined
@@ -80,6 +96,15 @@ const startPkcDaemonCapturingStderr = (args: string[], env?: Record<string, stri
         const onStdoutData = (data: Buffer) => {
             const output = data.toString();
             daemonProcess.capturedStdout += output;
+            // Capture the kubo RPC URL so stopPkcDaemon can /shutdown kubo afterwards (matches startPkcDaemon).
+            const kuboConfigMatch = output.match(/kuboRpcClientsOptions:\s*\[\s*'([^']+)'/);
+            if (!daemonProcess.kuboRpcUrl && kuboConfigMatch?.[1]) {
+                try {
+                    daemonProcess.kuboRpcUrl = new URL(kuboConfigMatch[1]);
+                } catch {
+                    /* ignore parse errors */
+                }
+            }
             if (output.match("Communities in data path")) {
                 daemonProcess.stdout!.off("data", onStdoutData);
                 daemonProcess.off("exit", onExit);

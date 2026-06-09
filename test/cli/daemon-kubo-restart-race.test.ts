@@ -169,30 +169,32 @@ describe("daemon shutdown with a wedged kubo startup (issue #70, PR #71 review)"
 
                         // Resolve once kubo serves its API; otherwise throw so withKuboBindRetry can
                         // decide: an "address already in use" message means retry, anything else is real.
-                        const outcome = await new Promise<"up">((resolve, reject) => {
-                            const deadline = Date.now() + 60000;
-                            const tick = async () => {
-                                if (proc.exitCode !== null || proc.signalCode !== null)
-                                    return reject(new Error(`daemon exited before kubo came up:\n${output}`));
-                                if (isAddressInUseError(output))
-                                    return reject(new Error(`kubo lost the bind race: address already in use\n${output}`));
-                                try {
-                                    const res = await fetch(`${e.kuboApiUrl}/version`, { method: "POST" });
-                                    if (res.ok) return resolve("up");
-                                } catch {
-                                    /* not up yet */
-                                }
-                                if (Date.now() > deadline) return reject(new Error(`timed out waiting for kubo API:\n${output}`));
-                                setTimeout(tick, 500);
-                            };
-                            void tick();
-                        });
-                        expect(outcome).toBe("up");
-                        return proc;
-                    },
-                    {
-                        cleanup: (e) => {
-                            void ensureKuboNodeStopped(e.kuboApiUrl);
+                        // On any failure kill THIS attempt's process group (never the port's listener,
+                        // which on a same-suite race could be another test's healthy daemon).
+                        try {
+                            const outcome = await new Promise<"up">((resolve, reject) => {
+                                const deadline = Date.now() + 60000;
+                                const tick = async () => {
+                                    if (proc.exitCode !== null || proc.signalCode !== null)
+                                        return reject(new Error(`daemon exited before kubo came up:\n${output}`));
+                                    if (isAddressInUseError(output))
+                                        return reject(new Error(`kubo lost the bind race: address already in use\n${output}`));
+                                    try {
+                                        const res = await fetch(`${e.kuboApiUrl}/version`, { method: "POST" });
+                                        if (res.ok) return resolve("up");
+                                    } catch {
+                                        /* not up yet */
+                                    }
+                                    if (Date.now() > deadline) return reject(new Error(`timed out waiting for kubo API:\n${output}`));
+                                    setTimeout(tick, 500);
+                                };
+                                void tick();
+                            });
+                            expect(outcome).toBe("up");
+                            return proc;
+                        } catch (error) {
+                            if (proc.pid) killProcessGroup(proc.pid, "SIGKILL");
+                            throw error;
                         }
                     }
                 );

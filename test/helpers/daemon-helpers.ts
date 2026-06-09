@@ -215,8 +215,16 @@ export interface KuboEndpoints {
 }
 
 // Allocate a fresh, currently-free set of RPC / kubo-API / gateway ports for one test daemon.
+// Probe each port on the interface it will actually be bound on: the PKC RPC server listens on
+// localhost, but kubo binds its API and gateway on 0.0.0.0 (wildcard). A port can be free on
+// loopback yet unavailable for a wildcard bind, so probing the wrong interface would hand back a
+// port that immediately collides on kubo startup.
 export const allocateKuboEndpoints = async (): Promise<KuboEndpoints> => {
-    const [rpcPort, kuboPort, gatewayPort] = await Promise.all([allocateFreePort(), allocateFreePort(), allocateFreePort()]);
+    const [rpcPort, kuboPort, gatewayPort] = await Promise.all([
+        allocateFreePort("127.0.0.1"),
+        allocateFreePort("0.0.0.0"),
+        allocateFreePort("0.0.0.0")
+    ]);
     return {
         rpcPort,
         kuboPort,
@@ -260,9 +268,11 @@ export const startPkcDaemonWithDynamicPorts = async (
         } catch (reason) {
             lastError = reason;
             if (!isAddressInUseError(reason) || attempt === retries) throw reason;
-            // The daemon exits when kubo can't bind; make sure nothing lingers on the losing
-            // kubo port before retrying with a fresh set.
-            await ensureKuboNodeStopped(endpoints.kuboApiUrl);
+            // Nothing of ours lingers to clean up: when kubo loses the bind race it never binds and
+            // startPkcDaemon's subprocess has already exited. We must NOT ensureKuboNodeStopped the
+            // losing port here — in a same-suite race the listener on it is another test's healthy
+            // daemon, and shutting that down would reintroduce cross-test flakes. Just retry with a
+            // fresh endpoint set.
         }
     }
     throw lastError;
