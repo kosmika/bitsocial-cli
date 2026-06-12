@@ -54,6 +54,20 @@ const getCommunityJson = async (address: string): Promise<Record<string, any>> =
     return JSON.parse(result.stdout);
 };
 
+// `community edit` resolves when the daemon accepts the edit, but a `community get` from a fresh
+// RPC connection can briefly observe the pre-edit state (pkc-js >= 0.0.46 applies settings changes
+// asynchronously enough that slow Windows CI runners hit the window — issue #91). Poll until the
+// predicate sees the post-edit state, then return the LAST read so callers assert the real final
+// value and a timeout still produces an informative diff.
+const getCommunityJsonUntil = async (address: string, predicate: (community: Record<string, any>) => boolean): Promise<Record<string, any>> => {
+    let community: Record<string, any> = {};
+    await waitForCondition(async () => {
+        community = await getCommunityJson(address);
+        return predicate(community);
+    }, 15000, 500);
+    return community;
+};
+
 // Use public key addresses — pkc-js rejects unresolvable .bso/.eth names
 const ROLE_ADDR_A = "12D3KooWNMYPSuPu8AiY6wRq5TJfx3r5pGoTNfRp6kHkgeUE2vpa";
 const ROLE_ADDR_B = "12D3KooWQbMbKTraSdLHvBJjiUGVwF2pPTt5J4Rv5cU4gMvJxFzr";
@@ -97,7 +111,7 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
     }, 60_000);
 
-    it("Setting a role to null via CLI removes it", { timeout: 30_000 }, async () => {
+    it("Setting a role to null via CLI removes it", { timeout: 60_000 }, async () => {
         // Add a role
         const addResult = await runBitsocialCommand([
             "community", "edit", communityAddress,
@@ -107,7 +121,7 @@ describe("community edit null removal (real pkc instance)", () => {
         expect(addResult.exitCode, `edit add failed: ${addResult.stderr}`).toBe(0);
 
         // Verify role was added
-        let community = await getCommunityJson(communityAddress);
+        let community = await getCommunityJsonUntil(communityAddress, (c) => !!c.roles?.[ROLE_ADDR_A]);
         let roles = community.roles || {};
         expect(roles[ROLE_ADDR_A]).toEqual({ role: "admin" });
 
@@ -120,12 +134,12 @@ describe("community edit null removal (real pkc instance)", () => {
         expect(removeResult.exitCode, `edit remove failed: ${removeResult.stderr}`).toBe(0);
 
         // Verify role was removed
-        community = await getCommunityJson(communityAddress);
+        community = await getCommunityJsonUntil(communityAddress, (c) => c.roles?.[ROLE_ADDR_A] === undefined);
         roles = community.roles || {};
         expect(roles[ROLE_ADDR_A]).toBeUndefined();
     });
 
-    it("Setting a role to null via JSON file removes it", { timeout: 30_000 }, async () => {
+    it("Setting a role to null via JSON file removes it", { timeout: 60_000 }, async () => {
         // Add a role first
         const addResult = await runBitsocialCommand([
             "community", "edit", communityAddress,
@@ -134,7 +148,7 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
         expect(addResult.exitCode, `edit add failed: ${addResult.stderr}`).toBe(0);
 
-        let community = await getCommunityJson(communityAddress);
+        let community = await getCommunityJsonUntil(communityAddress, (c) => !!c.roles?.[ROLE_ADDR_B]);
         let roles = community.roles || {};
         expect(roles[ROLE_ADDR_B]).toEqual({ role: "moderator" });
 
@@ -149,12 +163,12 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
         expect(removeResult.exitCode, `edit remove via json failed: ${removeResult.stderr}`).toBe(0);
 
-        community = await getCommunityJson(communityAddress);
+        community = await getCommunityJsonUntil(communityAddress, (c) => c.roles?.[ROLE_ADDR_B] === undefined);
         roles = community.roles || {};
         expect(roles[ROLE_ADDR_B]).toBeUndefined();
     });
 
-    it("Setting a top-level field to null via CLI removes it", { timeout: 30_000 }, async () => {
+    it("Setting a top-level field to null via CLI removes it", { timeout: 60_000 }, async () => {
         // Set a description first
         const setResult = await runBitsocialCommand([
             "community", "edit", communityAddress,
@@ -163,7 +177,7 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
         expect(setResult.exitCode, `edit set failed: ${setResult.stderr}`).toBe(0);
 
-        let community = await getCommunityJson(communityAddress);
+        let community = await getCommunityJsonUntil(communityAddress, (c) => c.description === "test description");
         expect(community.description).toBe("test description");
 
         // Remove via null
@@ -174,11 +188,11 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
         expect(removeResult.exitCode, `edit remove failed: ${removeResult.stderr}`).toBe(0);
 
-        community = await getCommunityJson(communityAddress);
+        community = await getCommunityJsonUntil(communityAddress, (c) => c.description === undefined);
         expect(community.description).toBeUndefined();
     });
 
-    it("Setting a nested object to null via CLI removes it", { timeout: 30_000 }, async () => {
+    it("Setting a nested object to null via CLI removes it", { timeout: 60_000 }, async () => {
         // Set suggested fields first
         const setResult = await runBitsocialCommand([
             "community", "edit", communityAddress,
@@ -188,7 +202,7 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
         expect(setResult.exitCode, `edit set failed: ${setResult.stderr}`).toBe(0);
 
-        let community = await getCommunityJson(communityAddress);
+        let community = await getCommunityJsonUntil(communityAddress, (c) => c.suggested?.primaryColor === "blue");
         expect(community.suggested?.primaryColor).toBe("blue");
 
         // Remove via null
@@ -199,11 +213,11 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
         expect(removeResult.exitCode, `edit remove failed: ${removeResult.stderr}`).toBe(0);
 
-        community = await getCommunityJson(communityAddress);
+        community = await getCommunityJsonUntil(communityAddress, (c) => c.suggested === undefined);
         expect(community.suggested).toBeUndefined();
     });
 
-    it("Mixed null and non-null roles: remove one, add another", { timeout: 30_000 }, async () => {
+    it("Mixed null and non-null roles: remove one, add another", { timeout: 60_000 }, async () => {
         // Add a role to remove later
         const addResult = await runBitsocialCommand([
             "community", "edit", communityAddress,
@@ -212,7 +226,7 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
         expect(addResult.exitCode, `edit add failed: ${addResult.stderr}`).toBe(0);
 
-        let community = await getCommunityJson(communityAddress);
+        let community = await getCommunityJsonUntil(communityAddress, (c) => !!c.roles?.[ROLE_ADDR_C]);
         let roles = community.roles || {};
         expect(roles[ROLE_ADDR_C]).toEqual({ role: "admin" });
 
@@ -225,7 +239,10 @@ describe("community edit null removal (real pkc instance)", () => {
         ]);
         expect(editResult.exitCode, `edit mixed failed: ${editResult.stderr}`).toBe(0);
 
-        community = await getCommunityJson(communityAddress);
+        community = await getCommunityJsonUntil(
+            communityAddress,
+            (c) => !!c.roles?.[ROLE_ADDR_D] && c.roles?.[ROLE_ADDR_C] === undefined
+        );
         roles = community.roles || {};
         expect(roles[ROLE_ADDR_D]).toEqual({ role: "moderator" });
         expect(roles[ROLE_ADDR_C]).toBeUndefined();

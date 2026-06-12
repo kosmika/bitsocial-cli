@@ -18,6 +18,7 @@ import {
     allocateFreePort,
     allocateKuboEndpoints,
     ensureKuboNodeStopped,
+    requestKuboShutdown,
     waitForWebSocketOpen,
     waitForKuboReady,
     waitForPortFree
@@ -246,10 +247,7 @@ describe("bitsocial daemon (kubo daemon is started by bitsocial-cli)", async () 
 
     [1, 2].map((tryNumber) =>
         it(`Kubo Node is restarted after failing for ${tryNumber}st time`, async () => {
-            const shutdownRes = await fetch(`${kuboApiUrl}/shutdown`, {
-                method: "POST"
-            });
-            expect(shutdownRes.status).toBe(200);
+            await requestKuboShutdown(kuboApiUrl);
             // Wait for kubo to actually shut down after acknowledging the shutdown request
             await waitForCondition(async () => {
                 try {
@@ -460,8 +458,7 @@ describe("bitsocial daemon kubo restart cleanup", async () => {
                 }
             };
 
-            const shutdownRes = await fetch(`${cleanupKuboApiUrl}/shutdown`, { method: "POST" });
-            expect(shutdownRes.status).toBe(200);
+            await requestKuboShutdown(cleanupKuboApiUrl);
 
             // Setup precondition (not the assertion under test): after /shutdown the daemon must
             // auto-restart kubo before we can verify it dies on SIGTERM. The detect window must absorb
@@ -667,8 +664,7 @@ describe("bitsocial daemon survives transient port occupation after its own kubo
             expect(kuboReady).toBe(true);
 
             // Shut down kubo via API and wait for it to actually stop
-            const shutdownRes = await fetch(`${exitKuboApiUrl}/shutdown`, { method: "POST" });
-            expect(shutdownRes.status).toBe(200);
+            await requestKuboShutdown(exitKuboApiUrl);
             await waitForCondition(async () => {
                 try {
                     await fetch(`${exitKuboApiUrl}/bitswap/stat`, { method: "POST" });

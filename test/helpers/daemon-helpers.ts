@@ -52,6 +52,23 @@ export const waitForCondition = async (predicate: () => Promise<boolean> | boole
     return false;
 };
 
+// Ask kubo to exit, tolerating a collision with pkc-js's own shutdown: pkc-js >= 0.0.46
+// reconfigures the node's HTTP routers from a background retry loop after connecting and POSTs
+// /shutdown itself when the endpoints changed (always on a fresh test repo), so kubo can already
+// be going down when a test's shutdown lands — the fetch then fails with ECONNREFUSED or "other
+// side closed" even though the desired outcome (kubo exiting) holds. Callers must verify the
+// actual stop/restart with waitForCondition (they all do); a reachable kubo answering anything
+// but 200 still fails loudly.
+export const requestKuboShutdown = async (kuboApiUrl: string): Promise<void> => {
+    let response: Response;
+    try {
+        response = await fetch(`${kuboApiUrl}/shutdown`, { method: "POST" });
+    } catch {
+        return; // connection refused/reset: kubo is already stopping or stopped
+    }
+    if (response.status !== 200) throw new Error(`kubo /shutdown returned HTTP ${response.status}`);
+};
+
 export const ensureKuboNodeStopped = async (kuboRpcUrl?: string) => {
     const url = kuboRpcUrl || defaults.KUBO_RPC_URL.toString();
     try {

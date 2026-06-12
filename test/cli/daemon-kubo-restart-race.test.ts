@@ -26,7 +26,8 @@ import {
     startPkcDaemonWithDynamicPorts,
     withKuboBindRetry,
     isAddressInUseError,
-    ensureKuboNodeStopped
+    ensureKuboNodeStopped,
+    requestKuboShutdown
 } from "../helpers/daemon-helpers.js";
 import { preInitKuboWithEphemeralSwarm } from "../helpers/kubo-helpers.js";
 import { startKuboNode } from "../../dist/ipfs/startIpfs.js";
@@ -80,8 +81,7 @@ describe("daemon kubo restart race (issue #70)", () => {
                 expect(kuboUpAfterPkcInit).toBe(true);
 
                 // Kill kubo out from under the daemon to trigger the restart cycle
-                const shutdownRes = await fetch(`${kuboApiUrl}/shutdown`, { method: "POST" });
-                expect(shutdownRes.status).toBe(200);
+                await requestKuboShutdown(kuboApiUrl);
 
                 // Restart is delayed ~7s by the hook; wait generously
                 const kuboRestarted = await waitForCondition(
@@ -270,8 +270,7 @@ describe("daemon shutdown with a late signal-exit registrant (issue #70)", () =>
                 kuboApiUrl = daemon.kuboApiUrl;
                 expect(typeof daemonProcess.pid).toBe("number");
 
-                const shutdownRes = await fetch(`${kuboApiUrl}/shutdown`, { method: "POST" });
-                expect(shutdownRes.status).toBe(200);
+                await requestKuboShutdown(kuboApiUrl);
 
                 // This is a setup precondition, not the assertion under test: after /shutdown the
                 // daemon must auto-restart kubo before we can verify it dies on SIGTERM. The detect
