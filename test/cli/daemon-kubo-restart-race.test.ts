@@ -22,6 +22,7 @@ import {
     type ManagedChildProcess,
     stopPkcDaemon,
     waitForCondition,
+    waitForKuboReady,
     startPkcDaemonWithDynamicPorts,
     withKuboBindRetry,
     isAddressInUseError,
@@ -69,6 +70,14 @@ describe("daemon kubo restart race (issue #70)", () => {
                 daemonProcess = daemon.daemonProcess;
                 kuboApiUrl = daemon.kuboApiUrl;
                 expect(typeof daemonProcess.pid).toBe("number");
+
+                // pkc-js >= 0.0.46 reconfigures the connected kubo's HTTP routers on init and, when
+                // the router endpoints changed (always true on a fresh test repo), POSTs /shutdown to
+                // kubo expecting its host to restart it. The daemon's keepKuboUp does — but the
+                // PORTCHECK delay below stretches that restart to ~7s, so kubo can be down right
+                // after the ready banner. Wait until it's back before killing it ourselves.
+                const kuboUpAfterPkcInit = await waitForKuboReady(kuboApiUrl, 40000);
+                expect(kuboUpAfterPkcInit).toBe(true);
 
                 // Kill kubo out from under the daemon to trigger the restart cycle
                 const shutdownRes = await fetch(`${kuboApiUrl}/shutdown`, { method: "POST" });
