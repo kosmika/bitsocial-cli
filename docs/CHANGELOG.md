@@ -1,5 +1,11 @@
 # Changelog
 
+## <small>0.19.72 (2026-06-12)</small>
+
+* fix(update): require MainPID ownership before treating a daemon as systemd-managed (issue #92) ([28591bd](https://github.com/bitsocialnet/bitsocial-cli/commit/28591bd)), closes [#92](https://github.com/bitsocialnet/bitsocial-cli/issues/92) [#89](https://github.com/bitsocialnet/bitsocial-cli/issues/89) [pre-#82](https://github.com/pre-/issues/82)
+* test: absorb pkc-js 0.0.46+ kubo restart and async edit visibility (issue #91) ([1849ff8](https://github.com/bitsocialnet/bitsocial-cli/commit/1849ff8)), closes [#91](https://github.com/bitsocialnet/bitsocial-cli/issues/91)
+* chore(deps): upgrade @pkcprotocol/pkc-js 0.0.45 -> 0.0.47 (issue #91) ([555cdde](https://github.com/bitsocialnet/bitsocial-cli/commit/555cdde)), closes [#91](https://github.com/bitsocialnet/bitsocial-cli/issues/91)
+
 ## <small>0.19.71 (2026-06-09)</small>
 
 * fix(update): restart systemd-managed daemons via their supervisor (#82) ([49a7026](https://github.com/bitsocialnet/bitsocial-cli/commit/49a7026)), closes [#82](https://github.com/bitsocialnet/bitsocial-cli/issues/82) [#82](https://github.com/bitsocialnet/bitsocial-cli/issues/82)
