@@ -222,12 +222,20 @@ export async function readAllDaemonStates(): Promise<DaemonState[]> {
     return states;
 }
 
-/** Delete a specific daemon's state file. Ignores ENOENT. */
+/**
+ * Delete a specific daemon's state file. Best-effort: pruning a stale file must never be fatal.
+ * Ignores ENOENT (already gone) and the Windows file-locking codes EPERM/EACCES/EBUSY — on Windows,
+ * unlinking a file another process still has open (or that is in "delete-pending" state) returns
+ * EPERM, unlike POSIX where it succeeds. Concurrent daemons sharing the .daemon_states dir race to
+ * prune the same dead-PID file; a loser there used to crash daemon startup. Another daemon will
+ * reclaim the file on its next prune.
+ */
 export async function deleteDaemonState(pid: number): Promise<void> {
     try {
         await fs.unlink(stateFilePath(pid));
     } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") throw e;
     }
 }
 

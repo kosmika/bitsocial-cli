@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs/promises";
 import path from "path";
 import { spawn, type ChildProcess } from "child_process";
@@ -88,6 +88,32 @@ describe("daemon-state", () => {
 
         it("should not throw when deleting non-existent state", async () => {
             await expect(deleteDaemonState(nextFakePid())).resolves.not.toThrow();
+        });
+
+        // Regression test for https://github.com/bitsocialnet/bitsocial-cli/issues/94
+        // On Windows, unlinking a state file that another process still has open (or that is in
+        // "delete-pending" state) returns EPERM/EACCES/EBUSY — unlike POSIX, where unlink of an
+        // open file succeeds. Concurrent daemons share the global .daemon_states dir and race to
+        // prune the same dead-PID file; the loser used to crash daemon startup (pruneStaleStates
+        // is awaited unguarded on startup). Pruning is best-effort, so these codes must be swallowed.
+        it.each(["EPERM", "EACCES", "EBUSY"])("should not throw when unlink fails with %s (Windows lock race)", async (code) => {
+            const err = Object.assign(new Error(`${code}: simulated`), { code });
+            const spy = vi.spyOn(fs, "unlink").mockRejectedValueOnce(err);
+            try {
+                await expect(deleteDaemonState(nextFakePid())).resolves.toBeUndefined();
+            } finally {
+                spy.mockRestore();
+            }
+        });
+
+        it("should still propagate an unexpected unlink error", async () => {
+            const err = Object.assign(new Error("EIO: simulated"), { code: "EIO" });
+            const spy = vi.spyOn(fs, "unlink").mockRejectedValueOnce(err);
+            try {
+                await expect(deleteDaemonState(nextFakePid())).rejects.toThrow("EIO");
+            } finally {
+                spy.mockRestore();
+            }
         });
     });
 
