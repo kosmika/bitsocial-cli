@@ -750,8 +750,14 @@ export default class Daemon extends Command {
             // "SYNCHRONOUS TERMINATION NOTICE") and orphan a kubo we may have already spawned, and
             // leave this daemon's state file behind. Run that cleanup now and drop the now-redundant
             // hook so the process exits clean. No-ops if we failed before the hook was registered.
-            // (issue #98)
-            if (runDaemonShutdown) await runDaemonShutdown().catch(() => {});
+            // Cap the wait with the same DAEMON_SHUTDOWN_TIMEOUT_MS the signal path gets (via the
+            // exit-hook `wait` option) so a hung daemonServer.destroy() can't swallow the original
+            // startup error forever; the unref'd timer never keeps the loop alive. (issue #98)
+            if (runDaemonShutdown)
+                await Promise.race([
+                    runDaemonShutdown().catch(() => {}),
+                    new Promise<void>((resolve) => setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS).unref())
+                ]);
             removeAsyncExitHook?.();
 
             throw err;
