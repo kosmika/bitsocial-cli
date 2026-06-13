@@ -863,6 +863,54 @@ describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown c
             if (kuboApiUrl) await ensureKuboNodeStopped(kuboApiUrl);
         }
     });
+
+    it.skipIf(process.platform === "win32")(
+        "kills kubo (and prints no exit-hook termination notice) when startup fails after kubo is up",
+        { timeout: 60000 },
+        async () => {
+            // Reproduces issue #98: when the daemon throws during startup *after* kubo has spawned
+            // (the real TOCTOU RPC-port race, simulated here via PKC_CLI_TEST_FAIL_AFTER_KUBO_START),
+            // oclif's error handler calls process.exit(). process.exit() runs only synchronous exit
+            // hooks, so exit-hook would skip the async kubo cleanup — printing "SYNCHRONOUS TERMINATION
+            // NOTICE" and orphaning kubo. The daemon must instead tear kubo down itself and exit quietly.
+            const endpoints = await allocateKuboEndpoints();
+            const dataPath = randomDirectory();
+            await preInitKuboWithEphemeralSwarm(
+                path.join(dataPath, ".bitsocial-cli.ipfs"),
+                new URL(endpoints.kuboRpcUrl),
+                new URL(endpoints.gatewayUrl)
+            );
+            try {
+                const result = await runPkcDaemonExpectFailure(["--pkcOptions.dataPath", dataPath, "--pkcRpcUrl", endpoints.rpcWsUrl], {
+                    KUBO_RPC_URL: endpoints.kuboRpcUrl,
+                    IPFS_GATEWAY_URL: endpoints.gatewayUrl,
+                    PKC_CLI_TEST_FAIL_AFTER_KUBO_START: "1"
+                });
+
+                // The daemon exited non-zero on the injected startup failure...
+                expect(result.exitCode).not.toBe(0);
+                // ...without exit-hook's synchronous-termination warning (proves the async cleanup ran).
+                const combinedOutput = `${result.stdout}\n${result.stderr}`;
+                expect(combinedOutput).not.toContain("SYNCHRONOUS TERMINATION NOTICE");
+                // ...and kubo was killed by the daemon's own cleanup, not orphaned.
+                const kuboStopped = await waitForCondition(
+                    async () => {
+                        try {
+                            const res = await fetch(`${endpoints.kuboApiUrl}/bitswap/stat`, { method: "POST" });
+                            return !res.ok;
+                        } catch {
+                            return true; // connection refused = stopped
+                        }
+                    },
+                    20000,
+                    500
+                );
+                expect(kuboStopped).toBe(true);
+            } finally {
+                await ensureKuboNodeStopped(endpoints.kuboApiUrl);
+            }
+        }
+    );
 });
 
 describe("bitsocial daemon DEBUG env var", () => {
