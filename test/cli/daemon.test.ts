@@ -798,9 +798,11 @@ describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown c
             daemonProcess = daemon.daemonProcess;
             kuboApiUrl = daemon.kuboApiUrl;
 
-            // Verify kubo is running
-            const kuboRes = await fetch(`${kuboApiUrl}/bitswap/stat`, { method: "POST" });
-            expect(kuboRes.status).toBe(200);
+            // Verify kubo is running. Poll with retry rather than a single fetch: pkc-js (>=0.0.46)
+            // restarts kubo around init (rewrites Routing config + POSTs /shutdown), so the API port
+            // has a brief connection-refused window right after the daemon's startup banner (issue #95).
+            const kuboReady = await waitForKuboReady(kuboApiUrl, 45000);
+            expect(kuboReady).toBe(true);
 
             // Send SIGTERM only - no backup /shutdown call
             daemonProcess.kill("SIGTERM");
@@ -829,9 +831,11 @@ describe("bitsocial daemon kills kubo on its own shutdown (no backup /shutdown c
             daemonProcess = daemon.daemonProcess;
             kuboApiUrl = daemon.kuboApiUrl;
 
-            // Verify kubo is running
-            const kuboRes = await fetch(`${kuboApiUrl}/bitswap/stat`, { method: "POST" });
-            expect(kuboRes.status).toBe(200);
+            // Verify kubo is running. Poll with retry rather than a single fetch: pkc-js (>=0.0.46)
+            // restarts kubo around init (rewrites Routing config + POSTs /shutdown), so the API port
+            // has a brief connection-refused window right after the daemon's startup banner (issue #95).
+            const kuboReady = await waitForKuboReady(kuboApiUrl, 45000);
+            expect(kuboReady).toBe(true);
 
             // Send first SIGTERM
             daemonProcess.kill("SIGTERM");
